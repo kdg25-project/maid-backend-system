@@ -1,0 +1,46 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "cafe-backend-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-10-26",
+	"d1_databases": [
+		{
+			"binding": "vantan_cafe_database",
+			"database_name": "vantan-cafe-database",
+			"database_id": "20dff09f-f9d1-40c0-ac91-942b412eda6c",
+			"remote": true
+		}
+	]
+	// "compatibility_flags": [
+	//   "nodejs_compat"
+	// ],
+	// "vars": {
+	//   "MY_VAR": "my-variable"
+	// },
+	// "kv_namespaces": [
+	//   {
+	//     "binding": "MY_KV_NAMESPACE",
+	//     "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	//   }
+	// ],
+	// "r2_buckets": [
+	//   {
+	//     "binding": "MY_BUCKET",
+	//     "bucket_name": "my-bucket"
+	//   }
+	// ],
+	// "d1_databases": [
+	//   {
+	//     "binding": "MY_DB",
+	//     "database_name": "my-database",
+	//     "database_id": ""
+	//   }
+	// ],
+	// "ai": {
+	//   "binding": "AI"
+	// },
+	// "observability": {
+	//   "enabled": true,
+	//   "head_sampling_rate": 1
+	// }
+}

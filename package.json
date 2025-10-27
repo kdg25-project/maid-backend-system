@@ -1,0 +1,18 @@
+{
+  "name": "cafe-backend-api",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --minify",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.7",
+    "hono": "^4.10.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "drizzle-kit": "^0.31.5",
+    "wrangler": "^4.4.0"
+  }
+}

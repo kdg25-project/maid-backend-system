@@ -1,0 +1,7 @@
+[[d1_databases]]
+binding = "vantan_cafe_database"
+database_name = "vantan-cafe-database"
+database_id = "20dff09f-f9d1-40c0-ac91-942b412eda6c"
+[[r2_buckets]]
+binding = "vantan-cafe-bucket"
+bucket_name = "vantan-cafe-bucket"
