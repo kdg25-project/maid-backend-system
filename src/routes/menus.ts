@@ -1,11 +1,11 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
-import { gt } from 'drizzle-orm'
+import { eq, gt } from 'drizzle-orm'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
-import { createSuccessResponse } from '../libs/responses'
-import { successResponseSchema } from '../libs/openapi'
+import { createErrorResponse, createSuccessResponse } from '../libs/responses'
+import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { menus } from '../../drizzle/schema'
 import { buildR2PublicUrl } from '../libs/storage'
 
@@ -62,6 +62,8 @@ const menuListResponseSchema = successResponseSchema(
     }),
 )
 
+const menuResponseSchema = successResponseSchema(menuSchema)
+
 const mapMenu = (env: Bindings, menu: MenuRow) => ({
   id: menu.id,
   name: menu.name,
@@ -98,6 +100,50 @@ const listMenusRouteDocs = describeRoute({
   },
 })
 
+const getMenuRouteDocs = describeRoute({
+  tags: ['Menus'],
+  summary: 'Fetch menu by id',
+  description: 'Retrieve a single menu item by identifier.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Menu identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  responses: {
+    200: {
+      description: 'Menu found.',
+      content: {
+        'application/json': {
+          schema: resolver(menuResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid menu identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Menu not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerMenuRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/menus', listMenusRouteDocs, async (c) => {
     const availableOnlyRaw = c.req.query('available_only')
@@ -119,5 +165,25 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
         menus: menuList.map((item) => mapMenu(c.env, item)),
       }),
     )
+  })
+
+  app.get('/api/menus/:id', getMenuRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid menu id.'), 400)
+    }
+
+    const id = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+    const menu = await db.query.menus.findFirst({
+      where: (fields, { eq: equals }) => equals(fields.id, id),
+    })
+
+    if (!menu) {
+      return c.json(createErrorResponse('Menu not found.'), 404)
+    }
+
+    return c.json(createSuccessResponse(mapMenu(c.env, menu)))
   })
 }
