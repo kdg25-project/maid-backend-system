@@ -6,6 +6,7 @@ export interface CloudflareBindings {
     delete(key: string): Promise<void>
   }
   R2_PUBLIC_BASE_URL?: string
+  MAID_API_PASSWORD: string
 }
 
 export type AppEnv = {

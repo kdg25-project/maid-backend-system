@@ -1,6 +1,7 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
 import { eq } from 'drizzle-orm'
+import type { OpenAPIV3 } from 'openapi-types'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
@@ -8,6 +9,7 @@ import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { maids } from '../../drizzle/schema'
 import { buildR2PublicUrl, deleteR2Object, uploadR2Object } from '../libs/storage'
+import { maidApiAuthMiddleware } from '../middlewares/maidApiAuth'
 
 const maidSchema = z
   .object({
@@ -78,6 +80,10 @@ const updateMaidJsonBodySchema = z
     description: 'JSON payload for updating a maid (name only).',
   })
 
+const maidApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
+  MaidApiKey: [],
+}
+
 const getMaidRouteDocs = describeRoute({
   tags: ['Maids'],
   summary: 'Fetch a maid',
@@ -94,6 +100,7 @@ const getMaidRouteDocs = describeRoute({
       },
     },
   ],
+  security: [maidApiSecurityRequirement],
   responses: {
     200: {
       description: 'Maid found.',
@@ -105,6 +112,14 @@ const getMaidRouteDocs = describeRoute({
     },
     400: {
       description: 'Invalid identifier supplied.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized. Missing or invalid x-api-key header.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -142,6 +157,7 @@ const createMaidRouteDocs = describeRoute({
       },
     },
   },
+  security: [maidApiSecurityRequirement],
   responses: {
     201: {
       description: 'Maid created successfully.',
@@ -153,6 +169,14 @@ const createMaidRouteDocs = describeRoute({
     },
     400: {
       description: 'Invalid request payload.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized. Missing or invalid x-api-key header.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -227,6 +251,7 @@ const updateMaidRouteDocs = describeRoute({
       },
     },
   },
+  security: [maidApiSecurityRequirement],
   responses: {
     200: {
       description: 'Maid updated successfully.',
@@ -238,6 +263,14 @@ const updateMaidRouteDocs = describeRoute({
     },
     400: {
       description: 'Invalid request payload.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized. Missing or invalid x-api-key header.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -271,6 +304,7 @@ const deleteMaidRouteDocs = describeRoute({
       },
     },
   ],
+  security: [maidApiSecurityRequirement],
   responses: {
     200: {
       description: 'Maid deleted successfully.',
@@ -282,6 +316,14 @@ const deleteMaidRouteDocs = describeRoute({
     },
     400: {
       description: 'Invalid maid identifier provided.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized. Missing or invalid x-api-key header.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -300,6 +342,8 @@ const deleteMaidRouteDocs = describeRoute({
 })
 
 export const registerMaidRoutes = (app: Hono<AppEnv>) => {
+  app.use('/api/maids/*', maidApiAuthMiddleware)
+
   app.get('/api/maids/:id', getMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
