@@ -1,10 +1,11 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
+import { eq } from 'drizzle-orm'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
-import { createSuccessResponse } from '../libs/responses'
-import { successResponseSchema } from '../libs/openapi'
+import { createErrorResponse, createSuccessResponse } from '../libs/responses'
+import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { orders } from '../../drizzle/schema'
 
 type OrderRow = typeof orders.$inferSelect
@@ -56,6 +57,8 @@ const orderListResponseSchema = successResponseSchema(
     }),
 )
 
+const orderResponseSchema = successResponseSchema(orderSchema)
+
 const mapOrder = (order: OrderRow) => ({
   id: order.id,
   user_id: order.userId,
@@ -81,6 +84,50 @@ const listOrdersRouteDocs = describeRoute({
   },
 })
 
+const getOrderRouteDocs = describeRoute({
+  tags: ['Orders'],
+  summary: 'Fetch order by id',
+  description: 'Retrieve a single order by identifier.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Order identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  responses: {
+    200: {
+      description: 'Order retrieved successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(orderResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid order identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Order not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerOrderRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/orders', listOrdersRouteDocs, async (c) => {
     const db = getDb(c.env)
@@ -94,5 +141,25 @@ export const registerOrderRoutes = (app: Hono<AppEnv>) => {
         orders: orderList.map((order) => mapOrder(order)),
       }),
     )
+  })
+
+  app.get('/api/orders/:id', getOrderRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid order id.'), 400)
+    }
+
+    const id = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+    const order = await db.query.orders.findFirst({
+      where: (fields, { eq: equals }) => equals(fields.id, id),
+    })
+
+    if (!order) {
+      return c.json(createErrorResponse('Order not found.'), 404)
+    }
+
+    return c.json(createSuccessResponse(mapOrder(order)))
   })
 }
