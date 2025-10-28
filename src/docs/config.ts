@@ -9,7 +9,7 @@ export const openApiOptions: Partial<GenerateSpecOptions> = {
     },
     servers: [
       {
-        url: 'http://api.kdgn.tech',
+        url: 'https://api.kdgn.tech',
         description: 'Production server',
       }
     ],
