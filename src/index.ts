@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
-import { drizzle } from "drizzle-orm/d1";
+import { registerDocsRoutes } from './docs/routes'
+import { registerHealthRoutes } from './routes/health'
 
 const app = new Hono()
 
-app.get('/', (c) => {
-  return c.text('Hello Hono!')
-})
+registerHealthRoutes(app)
+registerDocsRoutes(app)
 
 export default app
