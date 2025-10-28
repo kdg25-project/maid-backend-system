@@ -245,17 +245,35 @@ const updateMenuRouteDocs = describeRoute({
             name: {
               type: 'string',
               description: 'Updated menu name.',
+              example: 'Seasonal Omurice',
             },
             stock: {
               type: 'integer',
               minimum: 0,
               description: 'Updated stock quantity.',
+              example: 12,
             },
             image: {
               type: 'string',
               format: 'binary',
               description: 'Menu image file.',
+              example: 'menu-seasonal.jpg',
             },
+          },
+        },
+        examples: {
+          default: {
+            summary: 'Update menu with new image',
+            value: {
+              name: 'Seasonal Omurice',
+              stock: 12,
+              image: 'menu-seasonal.jpg',
+            },
+          },
+        },
+        encoding: {
+          image: {
+            contentType: 'image/jpeg',
           },
         },
       },

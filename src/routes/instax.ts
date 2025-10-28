@@ -113,19 +113,37 @@ const createInstaxRouteDocs = describeRoute({
               type: 'integer',
               minimum: 1,
               description: 'User identifier.',
+              example: 101,
             },
             maid_id: {
               type: 'integer',
               minimum: 1,
               description: 'Maid identifier.',
+              example: 5,
             },
             instax: {
               type: 'string',
               format: 'binary',
               description: 'Instax image file.',
+              example: 'instax-sample.jpg',
             },
           },
           required: ['user_id', 'maid_id', 'instax'],
+        },
+        examples: {
+          default: {
+            summary: 'Sample instax upload',
+            value: {
+              user_id: 101,
+              maid_id: 5,
+              instax: 'instax-sample.jpg',
+            },
+          },
+        },
+        encoding: {
+          instax: {
+            contentType: 'image/jpeg',
+          },
         },
       },
     },
@@ -166,19 +184,37 @@ const updateInstaxRouteDocs = describeRoute({
               type: 'integer',
               minimum: 1,
               description: 'User identifier.',
+              example: 101,
             },
             maid_id: {
               type: 'integer',
               minimum: 1,
               description: 'Maid identifier.',
+              example: 5,
             },
             instax: {
               type: 'string',
               format: 'binary',
               description: 'New instax image file.',
+              example: 'instax-replacement.jpg',
             },
           },
           required: ['user_id', 'maid_id', 'instax'],
+        },
+        examples: {
+          default: {
+            summary: 'Replace instax image',
+            value: {
+              user_id: 101,
+              maid_id: 5,
+              instax: 'instax-replacement.jpg',
+            },
+          },
+        },
+        encoding: {
+          instax: {
+            contentType: 'image/jpeg',
+          },
         },
       },
     },

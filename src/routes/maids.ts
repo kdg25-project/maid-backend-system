@@ -131,6 +131,14 @@ const createMaidRouteDocs = describeRoute({
     content: {
       'application/json': {
         schema: resolver(createMaidBodySchema) as unknown as Record<string, unknown>,
+        examples: {
+          default: {
+            summary: 'Create maid request',
+            value: {
+              name: 'Alice',
+            },
+          },
+        },
       },
     },
   },
@@ -176,6 +184,14 @@ const updateMaidRouteDocs = describeRoute({
     content: {
       'application/json': {
         schema: resolver(updateMaidJsonBodySchema) as unknown as Record<string, unknown>,
+        examples: {
+          default: {
+            summary: 'Update maid name',
+            value: {
+              name: 'Alice',
+            },
+          },
+        },
       },
       'multipart/form-data': {
         schema: {
@@ -184,12 +200,28 @@ const updateMaidRouteDocs = describeRoute({
             name: {
               type: 'string',
               description: 'Updated maid name.',
+              example: 'Maid Alice',
             },
             image: {
               type: 'string',
               format: 'binary',
               description: 'Image file for the maid.',
+              example: 'maid-alice.jpg',
             },
+          },
+        },
+        examples: {
+          default: {
+            summary: 'Update maid profile with image',
+            value: {
+              name: 'Maid Alice',
+              image: 'maid-alice.jpg',
+            },
+          },
+        },
+        encoding: {
+          image: {
+            contentType: 'image/jpeg',
           },
         },
       },
