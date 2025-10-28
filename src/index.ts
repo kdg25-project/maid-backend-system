@@ -5,6 +5,7 @@ import { registerMaidRoutes } from './routes/maids'
 import { registerMenuRoutes } from './routes/menus'
 import { registerUserRoutes } from './routes/users'
 import { registerOrderRoutes } from './routes/orders'
+import { registerInstaxRoutes } from './routes/instax'
 import type { AppEnv } from './types/bindings'
 
 const app = new Hono<AppEnv>()
@@ -14,6 +15,7 @@ registerMaidRoutes(app)
 registerMenuRoutes(app)
 registerUserRoutes(app)
 registerOrderRoutes(app)
+registerInstaxRoutes(app)
 registerDocsRoutes(app)
 
 export default app
