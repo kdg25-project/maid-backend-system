@@ -7,7 +7,7 @@ import { getDb } from '../libs/db'
 import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { menus } from '../../drizzle/schema'
-import { buildR2PublicUrl } from '../libs/storage'
+import { buildR2PublicUrl, deleteR2Object } from '../libs/storage'
 
 type Bindings = AppEnv['Bindings']
 type MenuRow = typeof menus.$inferSelect
@@ -144,6 +144,50 @@ const getMenuRouteDocs = describeRoute({
   },
 })
 
+const deleteMenuRouteDocs = describeRoute({
+  tags: ['Menus'],
+  summary: 'Delete a menu',
+  description: 'Remove an existing menu item and associated image asset.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Menu identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  responses: {
+    200: {
+      description: 'Menu deleted successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(menuResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid menu identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Menu not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerMenuRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/menus', listMenusRouteDocs, async (c) => {
     const availableOnlyRaw = c.req.query('available_only')
@@ -185,5 +229,31 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
     }
 
     return c.json(createSuccessResponse(mapMenu(c.env, menu)))
+  })
+
+  app.delete('/api/menus/:id', deleteMenuRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid menu id.'), 400)
+    }
+
+    const id = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+
+    const existing = await db.query.menus.findFirst({
+      where: (fields, { eq: equals }) => equals(fields.id, id),
+    })
+
+    if (!existing) {
+      return c.json(createErrorResponse('Menu not found.'), 404)
+    }
+
+    await db.delete(menus).where(eq(menus.id, id))
+    await deleteR2Object(c.env, existing.imageUrl)
+
+    return c.json(
+      createSuccessResponse(mapMenu(c.env, existing), 'Menu deleted successfully.'),
+    )
   })
 }
