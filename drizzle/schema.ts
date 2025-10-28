@@ -6,7 +6,7 @@ import {
   text,
 } from "drizzle-orm/sqlite-core";
 
-const orderStateEnum = ["pending", "served", "canceled"] as const;
+const orderStateEnum = ["pending", "preparing", "served"] as const;
 
 export const maids = sqliteTable("maid", {
   id: integer("id").primaryKey({ autoIncrement: true }),
