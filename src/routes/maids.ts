@@ -223,6 +223,50 @@ const updateMaidRouteDocs = describeRoute({
   },
 })
 
+const deleteMaidRouteDocs = describeRoute({
+  tags: ['Maids'],
+  summary: 'Delete a maid',
+  description: 'Remove a maid profile and associated image assets.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Maid identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  responses: {
+    200: {
+      description: 'Maid deleted successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(maidResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid maid identifier provided.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Maid not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerMaidRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/maids/:id', getMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
@@ -357,6 +401,32 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
 
     return c.json(
       createSuccessResponse(mapMaid(c.env, result), 'Maid updated successfully.'),
+    )
+  })
+
+  app.delete('/api/maids/:id', deleteMaidRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid maid id.'), 400)
+    }
+
+    const id = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+
+    const existing = await db.query.maids.findFirst({
+      where: (fields, { eq }) => eq(fields.id, id),
+    })
+
+    if (!existing) {
+      return c.json(createErrorResponse('Maid not found.'), 404)
+    }
+
+    await db.delete(maids).where(eq(maids.id, id))
+    await deleteR2Object(c.env, existing.imageUrl)
+
+    return c.json(
+      createSuccessResponse(mapMaid(c.env, existing), 'Maid deleted successfully.'),
     )
   })
 }
