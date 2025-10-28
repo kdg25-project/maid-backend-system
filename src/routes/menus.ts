@@ -7,7 +7,7 @@ import { getDb } from '../libs/db'
 import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { menus } from '../../drizzle/schema'
-import { buildR2PublicUrl, deleteR2Object } from '../libs/storage'
+import { buildR2PublicUrl, deleteR2Object, uploadR2Object } from '../libs/storage'
 
 type Bindings = AppEnv['Bindings']
 type MenuRow = typeof menus.$inferSelect
@@ -63,6 +63,33 @@ const menuListResponseSchema = successResponseSchema(
 )
 
 const menuResponseSchema = successResponseSchema(menuSchema)
+
+const updateMenuJsonBodySchema = z
+  .object({
+    name: z
+      .string()
+      .min(1, { message: 'Name must not be empty.' })
+      .optional()
+      .openapi({
+        example: 'Updated Omurice',
+        description: 'Updated menu name.',
+      }),
+    stock: z
+      .number()
+      .int({ message: 'Stock must be an integer.' })
+      .min(0, { message: 'Stock must be zero or greater.' })
+      .optional()
+      .openapi({
+        example: 5,
+        description: 'Updated stock quantity.',
+      }),
+  })
+  .refine((payload) => payload.name !== undefined || payload.stock !== undefined, {
+    message: 'At least one field must be provided.',
+  })
+  .openapi({
+    description: 'JSON payload for updating a menu item (without image).',
+  })
 
 const mapMenu = (env: Bindings, menu: MenuRow) => ({
   id: menu.id,
@@ -188,6 +215,80 @@ const deleteMenuRouteDocs = describeRoute({
   },
 })
 
+const updateMenuRouteDocs = describeRoute({
+  tags: ['Menus'],
+  summary: 'Update a menu',
+  description:
+    'Update an existing menu item. Supports JSON for text fields and multipart form-data when including an image.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Menu identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  requestBody: {
+    required: true,
+    content: {
+      'application/json': {
+        schema: resolver(updateMenuJsonBodySchema) as unknown as Record<string, unknown>,
+      },
+      'multipart/form-data': {
+        schema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Updated menu name.',
+            },
+            stock: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Updated stock quantity.',
+            },
+            image: {
+              type: 'string',
+              format: 'binary',
+              description: 'Menu image file.',
+            },
+          },
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Menu updated successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(menuResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid request payload.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Menu not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerMenuRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/menus', listMenusRouteDocs, async (c) => {
     const availableOnlyRaw = c.req.query('available_only')
@@ -254,6 +355,115 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
 
     return c.json(
       createSuccessResponse(mapMenu(c.env, existing), 'Menu deleted successfully.'),
+    )
+  })
+
+  app.patch('/api/menus/:id', updateMenuRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid menu id.'), 400)
+    }
+
+    const id = Number.parseInt(idParam, 10)
+    const contentType = c.req.header('content-type') ?? ''
+    let name: string | undefined
+    let stock: number | undefined
+    let imageFile: File | undefined
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await c.req.parseBody()
+
+      const maybeName = formData['name']
+      if (typeof maybeName === 'string' && maybeName.trim().length > 0) {
+        name = maybeName.trim()
+      }
+
+      const maybeStock = formData['stock']
+      if (typeof maybeStock === 'string' && maybeStock.trim().length > 0) {
+        const parsedStock = Number.parseInt(maybeStock, 10)
+        if (!Number.isInteger(parsedStock) || parsedStock < 0) {
+          return c.json(
+            createErrorResponse('Stock must be a non-negative integer.'),
+            400,
+          )
+        }
+        stock = parsedStock
+      }
+
+      const maybeImage = formData['image']
+      if (maybeImage instanceof File && maybeImage.size > 0) {
+        imageFile = maybeImage
+      }
+
+      if (!name && stock === undefined && !imageFile) {
+        return c.json(createErrorResponse('No updatable fields provided.'), 400)
+      }
+    } else {
+      const body = await c.req
+        .json()
+        .catch(() => null)
+      const parsed = updateMenuJsonBodySchema.safeParse(body)
+
+      if (!parsed.success) {
+        return c.json(
+          createErrorResponse('Invalid request body.', parsed.error.flatten()),
+          400,
+        )
+      }
+
+      name = parsed.data.name?.trim()
+      stock = parsed.data.stock
+    }
+
+    const db = getDb(c.env)
+    const existing = await db.query.menus.findFirst({
+      where: (fields, { eq: equals }) => equals(fields.id, id),
+    })
+
+    if (!existing) {
+      return c.json(createErrorResponse('Menu not found.'), 404)
+    }
+
+    const updateValues: Partial<typeof menus.$inferInsert> = {}
+
+    if (name) {
+      updateValues.name = name
+      existing.name = name
+    }
+
+    if (typeof stock === 'number') {
+      updateValues.stock = stock
+      existing.stock = stock
+    }
+
+    if (imageFile) {
+      const { key } = await uploadR2Object(c.env, `menus/${id}`, imageFile)
+      await deleteR2Object(c.env, existing.imageUrl)
+      updateValues.imageUrl = key
+      existing.imageUrl = key
+    }
+
+    if (Object.keys(updateValues).length === 0) {
+      return c.json(
+        createSuccessResponse(mapMenu(c.env, existing), 'No changes applied.'),
+      )
+    }
+
+    const now = new Date().toISOString()
+    updateValues.updatedAt = now
+    existing.updatedAt = now
+
+    const [updated] = await db
+      .update(menus)
+      .set(updateValues)
+      .where(eq(menus.id, id))
+      .returning()
+
+    const result = updated ?? { ...existing, ...updateValues }
+
+    return c.json(
+      createSuccessResponse(mapMenu(c.env, result), 'Menu updated successfully.'),
     )
   })
 }
