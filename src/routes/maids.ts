@@ -100,7 +100,6 @@ const getMaidRouteDocs = describeRoute({
       },
     },
   ],
-  security: [maidApiSecurityRequirement],
   responses: {
     200: {
       description: 'Maid found.',
@@ -112,14 +111,6 @@ const getMaidRouteDocs = describeRoute({
     },
     400: {
       description: 'Invalid identifier supplied.',
-      content: {
-        'application/json': {
-          schema: resolver(errorResponseSchema),
-        },
-      },
-    },
-    401: {
-      description: 'Unauthorized. Missing or invalid x-api-key header.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -342,8 +333,6 @@ const deleteMaidRouteDocs = describeRoute({
 })
 
 export const registerMaidRoutes = (app: Hono<AppEnv>) => {
-  app.use('/api/maids/*', maidApiAuthMiddleware)
-
   app.get('/api/maids/:id', getMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
@@ -365,7 +354,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     return c.json(createSuccessResponse(mapMaid(c.env, maid)))
   })
 
-  app.post('/api/maids', createMaidRouteDocs, async (c) => {
+  app.post('/api/maids', maidApiAuthMiddleware, createMaidRouteDocs, async (c) => {
     const body = await c.req
       .json()
       .catch(() => null)
@@ -392,7 +381,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     )
   })
 
-  app.patch('/api/maids/:id', updateMaidRouteDocs, async (c) => {
+  app.patch('/api/maids/:id', maidApiAuthMiddleware, updateMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
     if (!/^[1-9]\d*$/.test(idParam)) {
@@ -480,7 +469,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     )
   })
 
-  app.delete('/api/maids/:id', deleteMaidRouteDocs, async (c) => {
+  app.delete('/api/maids/:id', maidApiAuthMiddleware, deleteMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
     if (!/^[1-9]\d*$/.test(idParam)) {
