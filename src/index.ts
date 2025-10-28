@@ -3,6 +3,7 @@ import { registerDocsRoutes } from './docs/routes'
 import { registerHealthRoutes } from './routes/health'
 import { registerMaidRoutes } from './routes/maids'
 import { registerMenuRoutes } from './routes/menus'
+import { registerUserRoutes } from './routes/users'
 import type { AppEnv } from './types/bindings'
 
 const app = new Hono<AppEnv>()
@@ -10,6 +11,7 @@ const app = new Hono<AppEnv>()
 registerHealthRoutes(app)
 registerMaidRoutes(app)
 registerMenuRoutes(app)
+registerUserRoutes(app)
 registerDocsRoutes(app)
 
 export default app

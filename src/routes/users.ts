@@ -1,0 +1,234 @@
+import type { Hono } from 'hono'
+import { describeRoute, resolver } from 'hono-openapi'
+import { eq } from 'drizzle-orm'
+import { z } from '../libs/zod'
+import type { AppEnv } from '../types/bindings'
+import { getDb } from '../libs/db'
+import { createErrorResponse, createSuccessResponse } from '../libs/responses'
+import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
+import { users } from '../../drizzle/schema'
+
+type UserRow = typeof users.$inferSelect
+
+const normalizeNullableString = (value: string | null | undefined) =>
+  value && value.trim().length > 0 ? value : null
+
+const userSchema = z
+  .object({
+    id: z.number().int().openapi({
+      example: 101,
+      description: 'User identifier.',
+    }),
+    name: z
+      .string()
+      .nullable()
+      .openapi({
+        example: null,
+        description: 'User name if registered.',
+        nullable: true,
+      }),
+    maid_id: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({
+        example: 5,
+        description: 'Assigned maid identifier.',
+        nullable: true,
+      }),
+    instax_maid_id: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({
+        example: null,
+        description: 'Instax maid identifier if assigned.',
+        nullable: true,
+      }),
+    seat_id: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({
+        example: 12,
+        description: 'Seat identifier for the user.',
+        nullable: true,
+      }),
+    is_valid: z
+      .boolean()
+      .openapi({
+        example: true,
+        description: 'Indicates if the user is currently valid.',
+      }),
+    created_at: z
+      .string()
+      .openapi({
+        example: '2025-01-15T10:00:00.000Z',
+        description: 'Creation timestamp in ISO 8601 format.',
+      }),
+    updated_at: z
+      .string()
+      .openapi({
+        example: '2025-01-16T10:00:00.000Z',
+        description: 'Last update timestamp in ISO 8601 format.',
+      }),
+  })
+  .openapi({
+    description: 'User resource representation.',
+  })
+
+const userResponseSchema = successResponseSchema(userSchema)
+
+const createUserBodySchema = z
+  .object({
+    seat_id: z
+      .number()
+      .int({ message: 'seat_id must be an integer.' })
+      .min(1, { message: 'seat_id must be greater than zero.' })
+      .openapi({
+        example: 12,
+        description: 'Seat identifier assigned to the user.',
+      }),
+    maid_id: z
+      .number()
+      .int({ message: 'maid_id must be an integer.' })
+      .min(1, { message: 'maid_id must be greater than zero.' })
+      .openapi({
+        example: 5,
+        description: 'Maid identifier responsible for the user.',
+      }),
+  })
+  .openapi({
+    description: 'Payload for registering a user into the cafe.',
+  })
+
+const createUserRouteDocs = describeRoute({
+  tags: ['Users'],
+  summary: 'Register a user (entry registration)',
+  description:
+    'Registers or updates a user entry with seat and maid assignment, marking the user as valid.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'User identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  requestBody: {
+    required: true,
+    content: {
+      'application/json': {
+        schema: resolver(createUserBodySchema) as unknown as Record<string, unknown>,
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'User registered successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(userResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid payload or identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
+const mapUser = (user: UserRow) => ({
+  id: user.id,
+  name: normalizeNullableString(user.name),
+  maid_id: user.maidId ?? null,
+  instax_maid_id: user.instaxMaidId ?? null,
+  seat_id: user.seatId ?? null,
+  is_valid: Boolean(user.isValid),
+  created_at: user.createdAt,
+  updated_at: user.updatedAt,
+})
+
+export const registerUserRoutes = (app: Hono<AppEnv>) => {
+  app.post('/api/users/:id', createUserRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid user id.'), 400)
+    }
+
+    const body = await c.req
+      .json()
+      .catch(() => null)
+    const parsed = createUserBodySchema.safeParse(body)
+
+    if (!parsed.success) {
+      return c.json(
+        createErrorResponse('Invalid request body.', parsed.error.flatten()),
+        400,
+      )
+    }
+
+    const id = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+
+    const existing = await db.query.users.findFirst({
+      where: (fields, { eq: equals }) => equals(fields.id, id),
+    })
+
+    const now = new Date().toISOString()
+
+    if (existing) {
+      const [updated] = await db
+        .update(users)
+        .set({
+          maidId: parsed.data.maid_id,
+          seatId: parsed.data.seat_id,
+          instaxMaidId: null,
+          isValid: true,
+          name: existing.name ?? '',
+          updatedAt: now,
+        })
+        .where(eq(users.id, id))
+        .returning()
+
+      const result = updated ?? {
+        ...existing,
+        maidId: parsed.data.maid_id,
+        seatId: parsed.data.seat_id,
+        instaxMaidId: null,
+        isValid: true,
+        updatedAt: now,
+      }
+
+      return c.json(
+        createSuccessResponse(mapUser(result), 'User registered successfully.'),
+      )
+    }
+
+    const [inserted] = await db
+      .insert(users)
+      .values({
+        id,
+        maidId: parsed.data.maid_id,
+        seatId: parsed.data.seat_id,
+        instaxMaidId: null,
+        isValid: true,
+        name: '',
+      })
+      .returning()
+
+    return c.json(
+      createSuccessResponse(mapUser(inserted), 'User registered successfully.'),
+    )
+  })
+}
