@@ -59,6 +59,29 @@ const orderListResponseSchema = successResponseSchema(
 
 const orderResponseSchema = successResponseSchema(orderSchema)
 
+const createOrderBodySchema = z
+  .object({
+    user_id: z
+      .number()
+      .int({ message: 'user_id must be an integer.' })
+      .min(1, { message: 'user_id must be greater than zero.' })
+      .openapi({
+        example: 101,
+        description: 'Identifier of the user placing the order.',
+      }),
+    menu_id: z
+      .number()
+      .int({ message: 'menu_id must be an integer.' })
+      .min(1, { message: 'menu_id must be greater than zero.' })
+      .openapi({
+        example: 15,
+        description: 'Identifier of the menu item being ordered.',
+      }),
+  })
+  .openapi({
+    description: 'Payload for creating an order.',
+  })
+
 const mapOrder = (order: OrderRow) => ({
   id: order.id,
   user_id: order.userId,
@@ -164,6 +187,38 @@ const getOrdersByUserRouteDocs = describeRoute({
   },
 })
 
+const createOrderRouteDocs = describeRoute({
+  tags: ['Orders'],
+  summary: 'Create an order',
+  description: 'Create a new order with default state pending.',
+  requestBody: {
+    required: true,
+    content: {
+      'application/json': {
+        schema: resolver(createOrderBodySchema) as unknown as Record<string, unknown>,
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Order created successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(orderResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid payload.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerOrderRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/orders', listOrdersRouteDocs, async (c) => {
     const db = getDb(c.env)
@@ -197,6 +252,34 @@ export const registerOrderRoutes = (app: Hono<AppEnv>) => {
       createSuccessResponse({
         orders: orderList.map((order) => mapOrder(order)),
       }),
+    )
+  })
+
+  app.post('/api/orders', createOrderRouteDocs, async (c) => {
+    const body = await c.req
+      .json()
+      .catch(() => null)
+    const parsed = createOrderBodySchema.safeParse(body)
+
+    if (!parsed.success) {
+      return c.json(
+        createErrorResponse('Invalid request body.', parsed.error.flatten()),
+        400,
+      )
+    }
+
+    const db = getDb(c.env)
+    const [inserted] = await db
+      .insert(orders)
+      .values({
+        userId: parsed.data.user_id,
+        menuId: parsed.data.menu_id,
+      })
+      .returning()
+
+    return c.json(
+      createSuccessResponse(mapOrder(inserted), 'Order created successfully.'),
+      201,
     )
   })
 
