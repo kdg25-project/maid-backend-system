@@ -147,6 +147,50 @@ const createUserRouteDocs = describeRoute({
   },
 })
 
+const getUserRouteDocs = describeRoute({
+  tags: ['Users'],
+  summary: 'Fetch user by id',
+  description: 'Retrieve a single user entry by identifier.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'User identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  responses: {
+    200: {
+      description: 'User retrieved successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(userResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid user identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'User not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 const mapUser = (user: UserRow) => ({
   id: user.id,
   name: normalizeNullableString(user.name),
@@ -159,6 +203,26 @@ const mapUser = (user: UserRow) => ({
 })
 
 export const registerUserRoutes = (app: Hono<AppEnv>) => {
+  app.get('/api/users/:id', getUserRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid user id.'), 400)
+    }
+
+    const id = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+    const user = await db.query.users.findFirst({
+      where: (fields, { eq: equals }) => equals(fields.id, id),
+    })
+
+    if (!user) {
+      return c.json(createErrorResponse('User not found.'), 404)
+    }
+
+    return c.json(createSuccessResponse(mapUser(user)))
+  })
+
   app.post('/api/users/:id', createUserRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
