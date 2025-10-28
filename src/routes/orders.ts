@@ -82,6 +82,17 @@ const createOrderBodySchema = z
     description: 'Payload for creating an order.',
   })
 
+const updateOrderBodySchema = z
+  .object({
+    state: orderStateSchema.openapi({
+      example: 'preparing',
+      description: 'Updated order state.',
+    }),
+  })
+  .openapi({
+    description: 'Payload for updating the order state.',
+  })
+
 const mapOrder = (order: OrderRow) => ({
   id: order.id,
   user_id: order.userId,
@@ -219,6 +230,58 @@ const createOrderRouteDocs = describeRoute({
   },
 })
 
+const updateOrderRouteDocs = describeRoute({
+  tags: ['Orders'],
+  summary: 'Update order state',
+  description: 'Update the state for an existing order.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Order identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  requestBody: {
+    required: true,
+    content: {
+      'application/json': {
+        schema: resolver(updateOrderBodySchema) as unknown as Record<string, unknown>,
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Order updated successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(orderResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid request payload or identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Order not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerOrderRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/orders', listOrdersRouteDocs, async (c) => {
     const db = getDb(c.env)
@@ -280,6 +343,56 @@ export const registerOrderRoutes = (app: Hono<AppEnv>) => {
     return c.json(
       createSuccessResponse(mapOrder(inserted), 'Order created successfully.'),
       201,
+    )
+  })
+
+  app.patch('/api/orders/:id', updateOrderRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid order id.'), 400)
+    }
+
+    const body = await c.req
+      .json()
+      .catch(() => null)
+    const parsed = updateOrderBodySchema.safeParse(body)
+
+    if (!parsed.success) {
+      return c.json(
+        createErrorResponse('Invalid request body.', parsed.error.flatten()),
+        400,
+      )
+    }
+
+    const id = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+    const existing = await db.query.orders.findFirst({
+      where: (fields, { eq: equals }) => equals(fields.id, id),
+    })
+
+    if (!existing) {
+      return c.json(createErrorResponse('Order not found.'), 404)
+    }
+
+    if (existing.state === parsed.data.state) {
+      return c.json(
+        createSuccessResponse(mapOrder(existing), 'No changes applied.'),
+      )
+    }
+
+    const now = new Date().toISOString()
+    const [updated] = await db
+      .update(orders)
+      .set({ state: parsed.data.state, updatedAt: now })
+      .where(eq(orders.id, id))
+      .returning()
+
+    const result =
+      updated ?? { ...existing, state: parsed.data.state, updatedAt: now }
+
+    return c.json(
+      createSuccessResponse(mapOrder(result), 'Order updated successfully.'),
     )
   })
 
