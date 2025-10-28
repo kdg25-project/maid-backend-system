@@ -128,11 +128,68 @@ const getOrderRouteDocs = describeRoute({
   },
 })
 
+const getOrdersByUserRouteDocs = describeRoute({
+  tags: ['Orders'],
+  summary: 'List orders by user',
+  description: 'Retrieve orders associated with a specific user identifier.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'User identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  responses: {
+    200: {
+      description: 'User orders retrieved successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(orderListResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid user identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerOrderRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/orders', listOrdersRouteDocs, async (c) => {
     const db = getDb(c.env)
 
     const orderList = await db.query.orders.findMany({
+      orderBy: (fields, { desc }) => desc(fields.createdAt),
+    })
+
+    return c.json(
+      createSuccessResponse({
+        orders: orderList.map((order) => mapOrder(order)),
+      }),
+    )
+  })
+
+  app.get('/api/orders/users/:id', getOrdersByUserRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid user id.'), 400)
+    }
+
+    const userId = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+    const orderList = await db.query.orders.findMany({
+      where: (fields, { eq: equals }) => equals(fields.userId, userId),
       orderBy: (fields, { desc }) => desc(fields.createdAt),
     })
 
