@@ -1,6 +1,7 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
 import { z } from '../libs/zod'
+import type { AppEnv } from '../types/bindings'
 
 const healthResponseSchema = z
   .object({
@@ -29,6 +30,6 @@ const healthRouteDocs = describeRoute({
   },
 })
 
-export const registerHealthRoutes = (app: Hono) => {
+export const registerHealthRoutes = (app: Hono<AppEnv>) => {
   app.get('/', healthRouteDocs, (c) => c.json({ message: 'Hello Hono!' }))
 }
