@@ -5,6 +5,7 @@ import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
 import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
+import { maids } from '../../drizzle/schema'
 
 const maidSchema = z
   .object({
@@ -31,6 +32,22 @@ const maidSchema = z
   })
 
 const maidResponseSchema = successResponseSchema(maidSchema)
+
+const createMaidBodySchema = z
+  .object({
+    name: z
+      .string()
+      .min(1, { message: 'Name is required.' })
+      .openapi({
+        example: 'Alice',
+        description: 'Name to register for the maid.',
+      }),
+  })
+  .openapi({
+    description: 'Payload to create a maid.',
+  })
+
+const createMaidResponseSchema = successResponseSchema(maidSchema)
 
 const getMaidRouteDocs = describeRoute({
   tags: ['Maids'],
@@ -76,6 +93,38 @@ const getMaidRouteDocs = describeRoute({
   },
 })
 
+const createMaidRouteDocs = describeRoute({
+  tags: ['Maids'],
+  summary: 'Create a maid',
+  description: 'Register a new maid profile.',
+  requestBody: {
+    required: true,
+    content: {
+      'application/json': {
+        schema: resolver(createMaidBodySchema) as unknown as Record<string, unknown>,
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Maid created successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(createMaidResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid request payload.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerMaidRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/maids/:id', getMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
@@ -101,6 +150,40 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
         name: maid.name,
         image_url: maid.imageUrl ?? null,
       }),
+    )
+  })
+
+  app.post('/api/maids', createMaidRouteDocs, async (c) => {
+    const body = await c.req
+      .json()
+      .catch(() => null)
+    const parsed = createMaidBodySchema.safeParse(body)
+
+    if (!parsed.success) {
+      return c.json(
+        createErrorResponse('Invalid request body.', parsed.error.flatten()),
+        400,
+      )
+    }
+
+    const db = getDb(c.env)
+    const [inserted] = await db
+      .insert(maids)
+      .values({
+        name: parsed.data.name,
+      })
+      .returning()
+
+    return c.json(
+      createSuccessResponse(
+        {
+          id: inserted.id,
+          name: inserted.name,
+          image_url: inserted.imageUrl ?? null,
+        },
+        'Maid created successfully.',
+      ),
+      201,
     )
   })
 }
