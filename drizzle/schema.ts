@@ -13,8 +13,6 @@ export const maids = sqliteTable("maid", {
   name: text("name").notNull(),
   imageUrl: text("image_url"),
   isActive: integer("is_active", { mode: "boolean" })
-    .notNull()
-    .default(true),
 });
 
 export const users = sqliteTable(
