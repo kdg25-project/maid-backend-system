@@ -1,5 +1,5 @@
 import type { Hono } from 'hono'
-import { describeRoute, resolver } from 'hono-openapi'
+import { describeRoute, resolver, validator } from 'hono-openapi'
 import { eq, and } from 'drizzle-orm'
 import type { OpenAPIV3 } from 'openapi-types'
 import { z } from '../libs/zod'
@@ -348,6 +348,19 @@ const toggleMaidActiveBodySchema = z
     description: 'Payload to change maid active flag.',
   })
 
+const toggleMaidActiveBodyValidator = validator('json', toggleMaidActiveBodySchema, (result, c) => {
+  if (!result.success) {
+    const fallback = toggleMaidActiveBodySchema.safeParse((result as { data: unknown }).data)
+    return c.json(
+      createErrorResponse(
+        'Invalid request body.',
+        fallback.success ? undefined : fallback.error.flatten(),
+      ),
+      400,
+    )
+  }
+})
+
 const toggleMaidActiveRouteDocs = describeRoute({
   tags: ['Maids'],
   summary: 'Toggle maid active flag',
@@ -363,12 +376,8 @@ const toggleMaidActiveRouteDocs = describeRoute({
   ],
   requestBody: {
     required: true,
-    content: {
-      'application/json': {
-        schema: resolver(toggleMaidActiveBodySchema) as unknown as Record<string, unknown>,
-      },
-    },
-  },
+    description: 'Payload to change maid active flag.',
+  } as OpenAPIV3.RequestBodyObject,
   security: [maidApiSecurityRequirement],
   responses: {
     200: { description: 'Maid updated successfully.', content: { 'application/json': { schema: resolver(maidResponseSchema) } } },
@@ -578,7 +587,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
   })
 
   // 管理: メイドの公開フラグを切り替えるエンドポイント
-  app.patch('/api/maids/:id/active', maidApiAuthMiddleware, toggleMaidActiveRouteDocs, async (c) => {
+  app.patch('/api/maids/:id/active', maidApiAuthMiddleware, toggleMaidActiveBodyValidator, toggleMaidActiveRouteDocs, async (c) => {
     const idParam = c.req.param('id')
     if (!/^[1-9]\d*$/.test(idParam)) {
       return c.json(createErrorResponse('Invalid maid id.'), 400)
@@ -586,11 +595,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
 
     const id = Number.parseInt(idParam, 10)
 
-    const body = await c.req.json().catch(() => null)
-    const parsed = toggleMaidActiveBodySchema.safeParse(body)
-    if (!parsed.success) {
-      return c.json(createErrorResponse('Invalid request body.', parsed.error.flatten()), 400)
-    }
+    const parsed = c.req.valid('json')
 
     const db = getDb(c.env)
     const existing = await db.query.maids.findFirst({ where: (fields, { eq }) => eq(fields.id, id) })
@@ -598,8 +603,8 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       return c.json(createErrorResponse('Maid not found.'), 404)
     }
 
-    const [updated] = await db.update(maids).set({ isActive: parsed.data.is_active }).where(eq(maids.id, id)).returning()
-    const result = updated ?? { ...existing, isActive: parsed.data.is_active }
+    const [updated] = await db.update(maids).set({ isActive: parsed.is_active }).where(eq(maids.id, id)).returning()
+    const result = updated ?? { ...existing, isActive: parsed.is_active }
 
     return c.json(createSuccessResponse(mapMaid(c.env, result), 'Maid active flag updated.'))
   })

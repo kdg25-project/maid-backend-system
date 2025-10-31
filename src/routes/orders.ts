@@ -1,5 +1,5 @@
 import type { Hono } from 'hono'
-import { describeRoute, resolver } from 'hono-openapi'
+import { describeRoute, resolver, validator } from 'hono-openapi'
 import { eq } from 'drizzle-orm'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
@@ -7,6 +7,7 @@ import { getDb } from '../libs/db'
 import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { orders } from '../../drizzle/schema'
+import type { OpenAPIV3 } from 'openapi-types'
 
 type OrderRow = typeof orders.$inferSelect
 
@@ -92,6 +93,24 @@ const updateOrderBodySchema = z
   .openapi({
     description: 'Payload for updating the order state.',
   })
+
+const createJsonBodyValidator =
+  <Schema extends z.ZodTypeAny>(schema: Schema) =>
+  validator('json', schema, (result, c) => {
+    if (!result.success) {
+      const fallback = schema.safeParse((result as { data: unknown }).data)
+      return c.json(
+        createErrorResponse(
+          'Invalid request body.',
+          fallback.success ? undefined : fallback.error.flatten(),
+        ),
+        400,
+      )
+    }
+  })
+
+const createOrderBodyValidator = createJsonBodyValidator(createOrderBodySchema)
+const updateOrderBodyValidator = createJsonBodyValidator(updateOrderBodySchema)
 
 const mapOrder = (order: OrderRow) => ({
   id: order.id,
@@ -204,12 +223,8 @@ const createOrderRouteDocs = describeRoute({
   description: 'Create a new order with default state pending.',
   requestBody: {
     required: true,
-    content: {
-      'application/json': {
-        schema: resolver(createOrderBodySchema) as unknown as Record<string, unknown>,
-      },
-    },
-  },
+    description: 'Payload for creating an order.',
+  } as OpenAPIV3.RequestBodyObject,
   responses: {
     201: {
       description: 'Order created successfully.',
@@ -248,12 +263,8 @@ const updateOrderRouteDocs = describeRoute({
   ],
   requestBody: {
     required: true,
-    content: {
-      'application/json': {
-        schema: resolver(updateOrderBodySchema) as unknown as Record<string, unknown>,
-      },
-    },
-  },
+    description: 'Payload for updating the order state.',
+  } as OpenAPIV3.RequestBodyObject,
   responses: {
     200: {
       description: 'Order updated successfully.',
@@ -318,25 +329,14 @@ export const registerOrderRoutes = (app: Hono<AppEnv>) => {
     )
   })
 
-  app.post('/api/orders', createOrderRouteDocs, async (c) => {
-    const body = await c.req
-      .json()
-      .catch(() => null)
-    const parsed = createOrderBodySchema.safeParse(body)
-
-    if (!parsed.success) {
-      return c.json(
-        createErrorResponse('Invalid request body.', parsed.error.flatten()),
-        400,
-      )
-    }
-
+  app.post('/api/orders', createOrderBodyValidator, createOrderRouteDocs, async (c) => {
+    const parsed = c.req.valid('json')
     const db = getDb(c.env)
     const [inserted] = await db
       .insert(orders)
       .values({
-        userId: parsed.data.user_id,
-        menuId: parsed.data.menu_id,
+        userId: parsed.user_id,
+        menuId: parsed.menu_id,
       })
       .returning()
 
@@ -346,24 +346,14 @@ export const registerOrderRoutes = (app: Hono<AppEnv>) => {
     )
   })
 
-  app.patch('/api/orders/:id', updateOrderRouteDocs, async (c) => {
+  app.patch('/api/orders/:id', updateOrderBodyValidator, updateOrderRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
     if (!/^[1-9]\d*$/.test(idParam)) {
       return c.json(createErrorResponse('Invalid order id.'), 400)
     }
 
-    const body = await c.req
-      .json()
-      .catch(() => null)
-    const parsed = updateOrderBodySchema.safeParse(body)
-
-    if (!parsed.success) {
-      return c.json(
-        createErrorResponse('Invalid request body.', parsed.error.flatten()),
-        400,
-      )
-    }
+    const parsed = c.req.valid('json')
 
     const id = Number.parseInt(idParam, 10)
     const db = getDb(c.env)
@@ -375,7 +365,7 @@ export const registerOrderRoutes = (app: Hono<AppEnv>) => {
       return c.json(createErrorResponse('Order not found.'), 404)
     }
 
-    if (existing.state === parsed.data.state) {
+    if (existing.state === parsed.state) {
       return c.json(
         createSuccessResponse(mapOrder(existing), 'No changes applied.'),
       )
@@ -384,12 +374,12 @@ export const registerOrderRoutes = (app: Hono<AppEnv>) => {
     const now = new Date().toISOString()
     const [updated] = await db
       .update(orders)
-      .set({ state: parsed.data.state, updatedAt: now })
+      .set({ state: parsed.state, updatedAt: now })
       .where(eq(orders.id, id))
       .returning()
 
     const result =
-      updated ?? { ...existing, state: parsed.data.state, updatedAt: now }
+      updated ?? { ...existing, state: parsed.state, updatedAt: now }
 
     return c.json(
       createSuccessResponse(mapOrder(result), 'Order updated successfully.'),
