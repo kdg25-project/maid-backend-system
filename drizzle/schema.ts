@@ -12,6 +12,9 @@ export const maids = sqliteTable("maid", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   imageUrl: text("image_url"),
+  isActive: integer("is_active", { mode: "boolean" })
+    .notNull()
+    .default(true),
 });
 
 export const users = sqliteTable(
