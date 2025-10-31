@@ -1,6 +1,7 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
 import { eq, gt } from 'drizzle-orm'
+import type { OpenAPIV3 } from 'openapi-types'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
@@ -8,9 +9,14 @@ import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { menus } from '../../drizzle/schema'
 import { buildR2PublicUrl, deleteR2Object, uploadR2Object } from '../libs/storage'
+import { adminApiAuthMiddleware } from '../middlewares/adminApiAuth'
 
 type Bindings = AppEnv['Bindings']
 type MenuRow = typeof menus.$inferSelect
+
+const menuApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
+  AdminApiKey: [],
+}
 
 const menuSchema = z
   .object({
@@ -187,6 +193,7 @@ const deleteMenuRouteDocs = describeRoute({
       },
     },
   ],
+  security: [menuApiSecurityRequirement],
   responses: {
     200: {
       description: 'Menu deleted successfully.',
@@ -204,8 +211,92 @@ const deleteMenuRouteDocs = describeRoute({
         },
       },
     },
+    401: {
+      description: 'Unauthorized.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
     404: {
       description: 'Menu not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
+const createMenuRouteDocs = describeRoute({
+  tags: ['Menus'],
+  summary: 'Create a menu',
+  description: 'Register a new menu item including its opening stock and image asset.',
+  security: [menuApiSecurityRequirement],
+  requestBody: {
+    required: true,
+    content: {
+      'multipart/form-data': {
+        schema: {
+          type: 'object',
+          required: ['name', 'stock', 'image'],
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Menu display name.',
+              example: 'Chocolate Parfait',
+            },
+            stock: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Initial stock quantity.',
+              example: 20,
+            },
+            image: {
+              type: 'string',
+              format: 'binary',
+              description: 'Menu image file to upload.',
+              example: 'parfait.jpg',
+            },
+          },
+        },
+        encoding: {
+          image: {
+            contentType: 'image/*',
+          },
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Menu created successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(menuResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid request payload.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    500: {
+      description: 'Failed to create menu.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -232,6 +323,7 @@ const updateMenuRouteDocs = describeRoute({
       },
     },
   ],
+  security: [menuApiSecurityRequirement],
   requestBody: {
     required: true,
     content: {
@@ -296,6 +388,14 @@ const updateMenuRouteDocs = describeRoute({
         },
       },
     },
+    401: {
+      description: 'Unauthorized.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
     404: {
       description: 'Menu not found.',
       content: {
@@ -308,6 +408,86 @@ const updateMenuRouteDocs = describeRoute({
 })
 
 export const registerMenuRoutes = (app: Hono<AppEnv>) => {
+  app.post('/api/menus', adminApiAuthMiddleware, createMenuRouteDocs, async (c) => {
+    const contentType = c.req.header('content-type')?.toLowerCase() ?? ''
+    if (!contentType.includes('multipart/form-data')) {
+      return c.json(createErrorResponse('Content-Type must be multipart/form-data.'), 400)
+    }
+
+    const formData = await c.req.parseBody()
+    const rawName = formData['name']
+    if (typeof rawName !== 'string' || rawName.trim().length === 0) {
+      return c.json(createErrorResponse('Name is required.'), 400)
+    }
+    const name = rawName.trim()
+
+    const rawStock = formData['stock']
+    if (typeof rawStock !== 'string' || rawStock.trim().length === 0) {
+      return c.json(createErrorResponse('Stock is required.'), 400)
+    }
+
+    const parsedStock = Number.parseInt(rawStock, 10)
+    if (!Number.isInteger(parsedStock) || parsedStock < 0) {
+      return c.json(createErrorResponse('Stock must be a non-negative integer.'), 400)
+    }
+
+    const image = formData['image']
+    if (!(image instanceof File) || image.size === 0) {
+      return c.json(createErrorResponse('Image file is required.'), 400)
+    }
+
+    const db = getDb(c.env)
+    let insertedMenu: MenuRow | undefined
+    try {
+      const [inserted] = await db
+        .insert(menus)
+        .values({
+          name,
+          stock: parsedStock,
+        })
+        .returning()
+
+      insertedMenu = inserted
+    } catch (err) {
+      console.error('POST /api/menus insert error:', err)
+      return c.json(createErrorResponse('Failed to create menu.'), 500)
+    }
+
+    if (!insertedMenu) {
+      return c.json(createErrorResponse('Failed to create menu.'), 500)
+    }
+
+    const menuId = insertedMenu.id
+    let uploadedKey: string | undefined
+    try {
+      const uploadResult = await uploadR2Object(c.env, `menus/${menuId}`, image)
+      uploadedKey = uploadResult.key
+      const now = new Date().toISOString()
+      const [updated] = await db
+        .update(menus)
+        .set({
+          imageUrl: uploadResult.key,
+          updatedAt: now,
+        })
+        .where(eq(menus.id, menuId))
+        .returning()
+
+      const result = updated ?? { ...insertedMenu, imageUrl: uploadResult.key, updatedAt: now }
+
+      return c.json(
+        createSuccessResponse(mapMenu(c.env, result), 'Menu created successfully.'),
+        201,
+      )
+    } catch (err) {
+      console.error('POST /api/menus upload error:', err)
+      await db.delete(menus).where(eq(menus.id, menuId))
+      if (uploadedKey) {
+        await deleteR2Object(c.env, uploadedKey)
+      }
+      return c.json(createErrorResponse('Failed to create menu.'), 500)
+    }
+  })
+
   app.get('/api/menus', listMenusRouteDocs, async (c) => {
     const availableOnlyRaw = c.req.query('available_only')
     const availableOnly =
@@ -350,7 +530,7 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
     return c.json(createSuccessResponse(mapMenu(c.env, menu)))
   })
 
-  app.delete('/api/menus/:id', deleteMenuRouteDocs, async (c) => {
+  app.delete('/api/menus/:id', adminApiAuthMiddleware, deleteMenuRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
     if (!/^[1-9]\d*$/.test(idParam)) {
@@ -376,7 +556,7 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
     )
   })
 
-  app.patch('/api/menus/:id', updateMenuRouteDocs, async (c) => {
+  app.patch('/api/menus/:id', adminApiAuthMiddleware, updateMenuRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
     if (!/^[1-9]\d*$/.test(idParam)) {

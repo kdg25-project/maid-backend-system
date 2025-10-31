@@ -364,7 +364,7 @@ const toggleMaidActiveBodyValidator = validator('json', toggleMaidActiveBodySche
 const toggleMaidActiveRouteDocs = describeRoute({
   tags: ['Maids'],
   summary: 'Toggle maid active flag',
-  description: 'Set the maid\'s isActive flag (admin only).',
+  description: 'Set the maid\'s isActive flag',
   parameters: [
     {
       name: 'id',

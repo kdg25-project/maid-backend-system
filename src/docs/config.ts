@@ -21,6 +21,12 @@ export const openApiOptions: Partial<GenerateSpecOptions> = {
           name: 'x-api-key',
           description: 'メイド管理APIにアクセスするためのAPIキーを指定します。',
         },
+        AdminApiKey: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-api-key',
+          description: '管理者用APIにアクセスするためのAPIキーを指定します。',
+        },
       },
     },
   },
