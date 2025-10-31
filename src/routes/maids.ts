@@ -1,6 +1,6 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import type { OpenAPIV3 } from 'openapi-types'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
@@ -337,6 +337,47 @@ const deleteMaidRouteDocs = describeRoute({
   },
 })
 
+const toggleMaidActiveBodySchema = z
+  .object({
+    is_active: z.boolean().openapi({
+      description: 'Whether the maid should be active (true) or inactive (false).',
+      example: true,
+    }),
+  })
+  .openapi({
+    description: 'Payload to change maid active flag.',
+  })
+
+const toggleMaidActiveRouteDocs = describeRoute({
+  tags: ['Maids'],
+  summary: 'Toggle maid active flag',
+  description: 'Set the maid\'s isActive flag (admin only).',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Maid identifier.',
+      schema: { type: 'integer', minimum: 1 },
+    },
+  ],
+  requestBody: {
+    required: true,
+    content: {
+      'application/json': {
+        schema: resolver(toggleMaidActiveBodySchema) as unknown as Record<string, unknown>,
+      },
+    },
+  },
+  security: [maidApiSecurityRequirement],
+  responses: {
+    200: { description: 'Maid updated successfully.', content: { 'application/json': { schema: resolver(maidResponseSchema) } } },
+    400: { description: 'Invalid request.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
+    401: { description: 'Unauthorized.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
+    404: { description: 'Maid not found.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
+  },
+})
+
 export const registerMaidRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/maids', describeRoute({
     tags: ['Maids'],
@@ -526,6 +567,33 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     return c.json(
       createSuccessResponse(mapMaid(c.env, result), 'Maid updated successfully.'),
     )
+  })
+
+  // 管理: メイドの公開フラグを切り替えるエンドポイント
+  app.patch('/api/maids/:id/active', maidApiAuthMiddleware, toggleMaidActiveRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid maid id.'), 400)
+    }
+
+    const id = Number.parseInt(idParam, 10)
+
+    const body = await c.req.json().catch(() => null)
+    const parsed = toggleMaidActiveBodySchema.safeParse(body)
+    if (!parsed.success) {
+      return c.json(createErrorResponse('Invalid request body.', parsed.error.flatten()), 400)
+    }
+
+    const db = getDb(c.env)
+    const existing = await db.query.maids.findFirst({ where: (fields, { eq }) => eq(fields.id, id) })
+    if (!existing) {
+      return c.json(createErrorResponse('Maid not found.'), 404)
+    }
+
+    const [updated] = await db.update(maids).set({ isActive: parsed.data.is_active }).where(eq(maids.id, id)).returning()
+    const result = updated ?? { ...existing, isActive: parsed.data.is_active }
+
+    return c.json(createSuccessResponse(mapMaid(c.env, result), 'Maid active flag updated.'))
   })
 
   app.delete('/api/maids/:id', maidApiAuthMiddleware, deleteMaidRouteDocs, async (c) => {
