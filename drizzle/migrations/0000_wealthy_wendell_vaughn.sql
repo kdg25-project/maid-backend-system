@@ -13,7 +13,8 @@ CREATE INDEX `idx_instax_maid_id` ON `instax` (`maid_id`);--> statement-breakpoi
 CREATE TABLE `maid` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`name` text NOT NULL,
-	`image_url` text
+	`image_url` text,
+	`is_active` integer DEFAULT false NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `menu` (

@@ -14,7 +14,7 @@ export const maids = sqliteTable("maid", {
   imageUrl: text("image_url"),
   isActive: integer("is_active", { mode: "boolean" })
     .notNull()
-    .default(true),
+    .default(false),
 });
 
 export const users = sqliteTable(
