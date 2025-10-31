@@ -1,6 +1,6 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import type { OpenAPIV3 } from 'openapi-types'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
@@ -36,6 +36,11 @@ const maidSchema = z
   })
 
 const maidResponseSchema = successResponseSchema(maidSchema)
+
+const maidsListSchema = z.array(maidSchema).openapi({
+  description: 'List of maid resources.',
+})
+const maidsListResponseSchema = successResponseSchema(maidsListSchema)
 
 type Bindings = AppEnv['Bindings']
 type MaidRow = typeof maids.$inferSelect
@@ -332,7 +337,102 @@ const deleteMaidRouteDocs = describeRoute({
   },
 })
 
+const toggleMaidActiveBodySchema = z
+  .object({
+    is_active: z.boolean().openapi({
+      description: 'Whether the maid should be active (true) or inactive (false).',
+      example: true,
+    }),
+  })
+  .openapi({
+    description: 'Payload to change maid active flag.',
+  })
+
+const toggleMaidActiveRouteDocs = describeRoute({
+  tags: ['Maids'],
+  summary: 'Toggle maid active flag',
+  description: 'Set the maid\'s isActive flag (admin only).',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Maid identifier.',
+      schema: { type: 'integer', minimum: 1 },
+    },
+  ],
+  requestBody: {
+    required: true,
+    content: {
+      'application/json': {
+        schema: resolver(toggleMaidActiveBodySchema) as unknown as Record<string, unknown>,
+      },
+    },
+  },
+  security: [maidApiSecurityRequirement],
+  responses: {
+    200: { description: 'Maid updated successfully.', content: { 'application/json': { schema: resolver(maidResponseSchema) } } },
+    400: { description: 'Invalid request.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
+    401: { description: 'Unauthorized.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
+    404: { description: 'Maid not found.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
+  },
+})
+
 export const registerMaidRoutes = (app: Hono<AppEnv>) => {
+  app.get('/api/maids', describeRoute({
+    tags: ['Maids'],
+    summary: 'List maids',
+    description: 'Fetch a paginated list of maids.',
+    parameters: [
+      { name: 'page', in: 'query', required: false, description: 'Page number (1-based).', schema: { type: 'integer', minimum: 1, default: 1 } },
+      { name: 'per_page', in: 'query', required: false, description: 'Items per page (max 100).', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+      { name: 'is_active', in: 'query', required: false, description: 'Filter by active flag. true returns only active maids, false returns only inactive maids. If omitted defaults to true.', schema: { type: 'boolean', default: true } },
+    ],
+    responses: {
+      200: { description: 'List of maids.', content: { 'application/json': { schema: resolver(maidsListResponseSchema) } } },
+      400: { description: 'Invalid query parameters.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
+    },
+  }), async (c) => {
+    const pageParam = c.req.query('page') ?? '1'
+    const perParam = c.req.query('per_page') ?? c.req.query('perPage') ?? '20'
+    const isActiveQuery = c.req.query('is_active') ?? c.req.query('isActive')
+
+    const page = Number.parseInt(String(pageParam), 10)
+    const per = Number.parseInt(String(perParam), 10)
+
+    if (!Number.isFinite(page) || page < 1 || !Number.isFinite(per) || per < 1 || per > 100) {
+      return c.json(createErrorResponse('Invalid pagination parameters.'), 400)
+    }
+
+    let isActiveFilter = true
+    if (typeof isActiveQuery !== 'undefined') {
+      const val = String(isActiveQuery).trim().toLowerCase()
+      if (['true', '1', 'yes'].includes(val)) {
+        isActiveFilter = true
+      } else if (['false', '0', 'no'].includes(val)) {
+        isActiveFilter = false
+      } else {
+        return c.json(createErrorResponse('Invalid is_active parameter. Use true/false.'), 400)
+      }
+    }
+
+    const offset = (page - 1) * per
+    const db = getDb(c.env)
+
+    const rows = await db
+      .select()
+      .from(maids)
+      .where(eq(maids.isActive, isActiveFilter))
+      .limit(per)
+      .offset(offset)
+      .orderBy(maids.id)
+      .all()
+
+    const result = rows.map((r) => mapMaid(c.env, r))
+
+    return c.json(createSuccessResponse(result))
+  })
+
   app.get('/api/maids/:id', getMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
@@ -344,7 +444,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
 
     const db = getDb(c.env)
     const maid = await db.query.maids.findFirst({
-      where: (fields, { eq }) => eq(fields.id, id),
+      where: (fields, { eq, and }) => and(eq(fields.id, id), eq(fields.isActive, true)),
     })
 
     if (!maid) {
@@ -467,6 +567,33 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     return c.json(
       createSuccessResponse(mapMaid(c.env, result), 'Maid updated successfully.'),
     )
+  })
+
+  // 管理: メイドの公開フラグを切り替えるエンドポイント
+  app.patch('/api/maids/:id/active', maidApiAuthMiddleware, toggleMaidActiveRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid maid id.'), 400)
+    }
+
+    const id = Number.parseInt(idParam, 10)
+
+    const body = await c.req.json().catch(() => null)
+    const parsed = toggleMaidActiveBodySchema.safeParse(body)
+    if (!parsed.success) {
+      return c.json(createErrorResponse('Invalid request body.', parsed.error.flatten()), 400)
+    }
+
+    const db = getDb(c.env)
+    const existing = await db.query.maids.findFirst({ where: (fields, { eq }) => eq(fields.id, id) })
+    if (!existing) {
+      return c.json(createErrorResponse('Maid not found.'), 404)
+    }
+
+    const [updated] = await db.update(maids).set({ isActive: parsed.data.is_active }).where(eq(maids.id, id)).returning()
+    const result = updated ?? { ...existing, isActive: parsed.data.is_active }
+
+    return c.json(createSuccessResponse(mapMaid(c.env, result), 'Maid active flag updated.'))
   })
 
   app.delete('/api/maids/:id', maidApiAuthMiddleware, deleteMaidRouteDocs, async (c) => {
