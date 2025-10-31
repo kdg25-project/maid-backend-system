@@ -37,6 +37,11 @@ const maidSchema = z
 
 const maidResponseSchema = successResponseSchema(maidSchema)
 
+const maidsListSchema = z.array(maidSchema).openapi({
+  description: 'List of maid resources.',
+})
+const maidsListResponseSchema = successResponseSchema(maidsListSchema)
+
 type Bindings = AppEnv['Bindings']
 type MaidRow = typeof maids.$inferSelect
 
@@ -333,6 +338,46 @@ const deleteMaidRouteDocs = describeRoute({
 })
 
 export const registerMaidRoutes = (app: Hono<AppEnv>) => {
+  app.get('/api/maids', describeRoute({
+    tags: ['Maids'],
+    summary: 'List maids',
+    description: 'Fetch a paginated list of maids.',
+    parameters: [
+      { name: 'page', in: 'query', required: false, description: 'Page number (1-based).', schema: { type: 'integer', minimum: 1, default: 1 } },
+      { name: 'per_page', in: 'query', required: false, description: 'Items per page (max 100).', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+    ],
+    responses: {
+      200: { description: 'List of maids.', content: { 'application/json': { schema: resolver(maidsListResponseSchema) } } },
+      400: { description: 'Invalid query parameters.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
+    },
+  }), async (c) => {
+    const pageParam = c.req.query('page') ?? '1'
+    const perParam = c.req.query('per_page') ?? c.req.query('perPage') ?? '20'
+
+    const page = Number.parseInt(String(pageParam), 10)
+    const per = Number.parseInt(String(perParam), 10)
+
+    if (!Number.isFinite(page) || page < 1 || !Number.isFinite(per) || per < 1 || per > 100) {
+      return c.json(createErrorResponse('Invalid pagination parameters.'), 400)
+    }
+
+    const offset = (page - 1) * per
+    const db = getDb(c.env)
+
+    const rows = await db
+      .select()
+      .from(maids)
+  .where(eq(maids.isActive, true))
+      .limit(per)
+      .offset(offset)
+      .orderBy(maids.id)
+      .all()
+
+    const result = rows.map((r) => mapMaid(c.env, r))
+
+    return c.json(createSuccessResponse(result))
+  })
+
   app.get('/api/maids/:id', getMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
@@ -344,7 +389,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
 
     const db = getDb(c.env)
     const maid = await db.query.maids.findFirst({
-      where: (fields, { eq }) => eq(fields.id, id),
+      where: (fields, { eq, and }) => and(eq(fields.id, id), eq(fields.isActive, true)),
     })
 
     if (!maid) {
