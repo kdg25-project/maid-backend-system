@@ -352,9 +352,9 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       400: { description: 'Invalid query parameters.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
     },
   }), async (c) => {
-  const pageParam = c.req.query('page') ?? '1'
-  const perParam = c.req.query('per_page') ?? c.req.query('perPage') ?? '20'
-  const isActiveQuery = c.req.query('is_active') ?? c.req.query('isActive')
+    const pageParam = c.req.query('page') ?? '1'
+    const perParam = c.req.query('per_page') ?? c.req.query('perPage') ?? '20'
+    const isActiveQuery = c.req.query('is_active') ?? c.req.query('isActive')
 
     const page = Number.parseInt(String(pageParam), 10)
     const per = Number.parseInt(String(perParam), 10)
