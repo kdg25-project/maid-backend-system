@@ -7,8 +7,13 @@ import { registerUserRoutes } from './routes/users'
 import { registerOrderRoutes } from './routes/orders'
 import { registerInstaxRoutes } from './routes/instax'
 import type { AppEnv } from './types/bindings'
+import { cors } from 'hono/cors'
 
 const app = new Hono<AppEnv>()
+
+app.use(cors({
+    origin: "*"
+}))
 
 registerHealthRoutes(app)
 registerMaidRoutes(app)

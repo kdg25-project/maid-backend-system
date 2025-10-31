@@ -1,0 +1,1 @@
+ALTER TABLE `maid` ADD `is_active` integer DEFAULT true NOT NULL;
