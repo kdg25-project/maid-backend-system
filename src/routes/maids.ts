@@ -393,44 +393,52 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       400: { description: 'Invalid query parameters.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
     },
   }), async (c) => {
-    const pageParam = c.req.query('page') ?? '1'
-    const perParam = c.req.query('per_page') ?? c.req.query('perPage') ?? '20'
-    const isActiveQuery = c.req.query('is_active') ?? c.req.query('isActive')
+    try {
+      const pageParam = c.req.query('page') ?? '1'
+      const perParam = c.req.query('per_page') ?? c.req.query('perPage') ?? '20'
+      const isActiveQuery = c.req.query('is_active') ?? c.req.query('isActive')
 
-    const page = Number.parseInt(String(pageParam), 10)
-    const per = Number.parseInt(String(perParam), 10)
+      const page = Number.parseInt(String(pageParam), 10)
+      const per = Number.parseInt(String(perParam), 10)
 
-    if (!Number.isFinite(page) || page < 1 || !Number.isFinite(per) || per < 1 || per > 100) {
-      return c.json(createErrorResponse('Invalid pagination parameters.'), 400)
-    }
-
-    let isActiveFilter = true
-    if (typeof isActiveQuery !== 'undefined') {
-      const val = String(isActiveQuery).trim().toLowerCase()
-      if (['true', '1', 'yes'].includes(val)) {
-        isActiveFilter = true
-      } else if (['false', '0', 'no'].includes(val)) {
-        isActiveFilter = false
-      } else {
-        return c.json(createErrorResponse('Invalid is_active parameter. Use true/false.'), 400)
+      if (!Number.isFinite(page) || page < 1 || !Number.isFinite(per) || per < 1 || per > 100) {
+        return c.json(createErrorResponse('Invalid pagination parameters.'), 400)
       }
+
+      let isActiveFilter = true
+      if (typeof isActiveQuery !== 'undefined') {
+        const val = String(isActiveQuery).trim().toLowerCase()
+        if (['true', '1', 'yes'].includes(val)) {
+          isActiveFilter = true
+        } else if (['false', '0', 'no'].includes(val)) {
+          isActiveFilter = false
+        } else {
+          return c.json(createErrorResponse('Invalid is_active parameter. Use true/false.'), 400)
+        }
+      }
+
+      const offset = (page - 1) * per
+      const db = getDb(c.env)
+
+      const rows = await db
+        .select()
+        .from(maids)
+        .where(eq(maids.isActive, isActiveFilter))
+        .limit(per)
+        .offset(offset)
+        .orderBy(maids.id)
+        .all()
+
+      const result = rows.map((r) => mapMaid(c.env, r))
+
+      return c.json(createSuccessResponse(result))
+    } catch (err: any) {
+      // Log for diagnostics
+      console.error('GET /api/maids error:', err)
+  const debug = (c.env as any)?.DEBUG === '1' || c.req.header('x-debug') === '1'
+      const message = debug ? String(err?.message ?? err) : 'Internal Server Error'
+      return c.json(createErrorResponse(message), 500)
     }
-
-    const offset = (page - 1) * per
-    const db = getDb(c.env)
-
-    const rows = await db
-      .select()
-      .from(maids)
-      .where(eq(maids.isActive, isActiveFilter))
-      .limit(per)
-      .offset(offset)
-      .orderBy(maids.id)
-      .all()
-
-    const result = rows.map((r) => mapMaid(c.env, r))
-
-    return c.json(createSuccessResponse(result))
   })
 
   app.get('/api/maids/:id', getMaidRouteDocs, async (c) => {
