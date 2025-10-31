@@ -345,14 +345,16 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     parameters: [
       { name: 'page', in: 'query', required: false, description: 'Page number (1-based).', schema: { type: 'integer', minimum: 1, default: 1 } },
       { name: 'per_page', in: 'query', required: false, description: 'Items per page (max 100).', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+      { name: 'is_active', in: 'query', required: false, description: 'Filter by active flag. true returns only active maids, false returns only inactive maids. If omitted defaults to true.', schema: { type: 'boolean', default: true } },
     ],
     responses: {
       200: { description: 'List of maids.', content: { 'application/json': { schema: resolver(maidsListResponseSchema) } } },
       400: { description: 'Invalid query parameters.', content: { 'application/json': { schema: resolver(errorResponseSchema) } } },
     },
   }), async (c) => {
-    const pageParam = c.req.query('page') ?? '1'
-    const perParam = c.req.query('per_page') ?? c.req.query('perPage') ?? '20'
+  const pageParam = c.req.query('page') ?? '1'
+  const perParam = c.req.query('per_page') ?? c.req.query('perPage') ?? '20'
+  const isActiveQuery = c.req.query('is_active') ?? c.req.query('isActive')
 
     const page = Number.parseInt(String(pageParam), 10)
     const per = Number.parseInt(String(perParam), 10)
@@ -361,13 +363,25 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       return c.json(createErrorResponse('Invalid pagination parameters.'), 400)
     }
 
+    let isActiveFilter = true
+    if (typeof isActiveQuery !== 'undefined') {
+      const val = String(isActiveQuery).trim().toLowerCase()
+      if (['true', '1', 'yes'].includes(val)) {
+        isActiveFilter = true
+      } else if (['false', '0', 'no'].includes(val)) {
+        isActiveFilter = false
+      } else {
+        return c.json(createErrorResponse('Invalid is_active parameter. Use true/false.'), 400)
+      }
+    }
+
     const offset = (page - 1) * per
     const db = getDb(c.env)
 
     const rows = await db
       .select()
       .from(maids)
-  .where(eq(maids.isActive, true))
+      .where(eq(maids.isActive, isActiveFilter))
       .limit(per)
       .offset(offset)
       .orderBy(maids.id)
