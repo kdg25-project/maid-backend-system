@@ -91,6 +91,25 @@ const updateMenuJsonBodySchema = z
     description: 'JSON payload for updating a menu item (without image).',
   })
 
+const createMenuJsonBodySchema = z
+  .object({
+    name: z.string().min(1, { message: 'Name must not be empty.' }).openapi({
+      example: 'Omurice',
+      description: 'Menu item name.',
+    }),
+    stock: z
+      .number()
+      .int({ message: 'Stock must be an integer.' })
+      .min(0, { message: 'Stock must be zero or greater.' })
+      .openapi({
+        example: 10,
+        description: 'Initial stock quantity.',
+      }),
+  })
+  .openapi({
+    description: 'JSON payload for creating a menu item (without image).',
+  })
+
 const mapMenu = (env: Bindings, menu: MenuRow) => ({
   id: menu.id,
   name: menu.name,
@@ -307,6 +326,68 @@ const updateMenuRouteDocs = describeRoute({
   },
 })
 
+const createMenuRouteDocs = describeRoute({
+  tags: ['Menus'],
+  summary: 'Create a menu',
+  description: 'Create a new menu item. Supports JSON payload or multipart/form-data when including an image.',
+  requestBody: {
+    required: true,
+    content: {
+      'application/json': {
+        schema: resolver(createMenuJsonBodySchema) as unknown as Record<string, unknown>,
+      },
+      'multipart/form-data': {
+        schema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Menu item name.',
+              example: 'Omurice',
+            },
+            stock: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Initial stock quantity.',
+              example: 10,
+            },
+            image: {
+              type: 'string',
+              format: 'binary',
+              description: 'Menu image file.',
+              example: 'menu.jpg',
+            },
+          },
+          required: ['name', 'stock'],
+        },
+        encoding: {
+          image: {
+            contentType: 'image/jpeg',
+          },
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Menu created successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(menuResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid request payload.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerMenuRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/menus', listMenusRouteDocs, async (c) => {
     const availableOnlyRaw = c.req.query('available_only')
@@ -328,6 +409,78 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
         menus: menuList.map((item) => mapMenu(c.env, item)),
       }),
     )
+  })
+
+  app.post('/api/menus', createMenuRouteDocs, async (c) => {
+    const contentType = c.req.header('content-type') ?? ''
+    let name: string | undefined
+    let stock: number | undefined
+    let imageFile: File | undefined
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await c.req.parseBody()
+
+      const maybeName = formData['name']
+      if (typeof maybeName === 'string' && maybeName.trim().length > 0) {
+        name = maybeName.trim()
+      }
+
+      const maybeStock = formData['stock']
+      if (typeof maybeStock === 'string' && maybeStock.trim().length > 0) {
+        const parsedStock = Number.parseInt(maybeStock, 10)
+        if (!Number.isInteger(parsedStock) || parsedStock < 0) {
+          return c.json(createErrorResponse('Stock must be a non-negative integer.'), 400)
+        }
+        stock = parsedStock
+      }
+
+      const maybeImage = formData['image']
+      if (maybeImage instanceof File && maybeImage.size > 0) {
+        imageFile = maybeImage
+      }
+
+      if (!name || typeof stock !== 'number') {
+        return c.json(createErrorResponse('Name and stock are required.'), 400)
+      }
+    } else {
+      const body = await c.req.json().catch(() => null)
+      const parsed = createMenuJsonBodySchema.safeParse(body)
+
+      if (!parsed.success) {
+        return c.json(createErrorResponse('Invalid request body.', parsed.error.flatten()), 400)
+      }
+
+      name = parsed.data.name.trim()
+      stock = parsed.data.stock
+    }
+
+    const db = getDb(c.env)
+    const now = new Date().toISOString()
+
+    const [inserted] = await db
+      .insert(menus)
+      .values({ name: name as string, stock: stock as number, createdAt: now, updatedAt: now })
+      .returning()
+
+    if (!inserted) {
+      return c.json(createErrorResponse('Failed to create menu.'), 500)
+    }
+
+    let result = inserted
+
+    if (imageFile) {
+      const { key } = await uploadR2Object(c.env, `menus/${inserted.id}`, imageFile)
+      const updatedAt = new Date().toISOString()
+      const [updated] = await db
+        .update(menus)
+        .set({ imageUrl: key, updatedAt })
+        .where(eq(menus.id, inserted.id))
+        .returning()
+
+      result = updated ?? { ...inserted, imageUrl: key, updatedAt }
+    }
+
+    return c.json(createSuccessResponse(mapMenu(c.env, result), 'Menu created successfully.'), 201)
   })
 
   app.get('/api/menus/:id', getMenuRouteDocs, async (c) => {
