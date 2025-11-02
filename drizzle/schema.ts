@@ -15,6 +15,9 @@ export const maids = sqliteTable("maid", {
   isActive: integer("is_active", { mode: "boolean" })
     .notNull()
     .default(false),
+  isInstaxAvailable: integer("is_instax_available", { mode: "boolean" })
+    .notNull()
+    .default(false),
 });
 
 export const users = sqliteTable(

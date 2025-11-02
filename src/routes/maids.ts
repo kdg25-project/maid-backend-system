@@ -30,6 +30,12 @@ const maidSchema = z
         description: 'Public URL of the maid image if available.',
         nullable: true,
       }),
+    is_instax_available: z
+      .boolean()
+      .openapi({
+        example: true,
+        description: 'Indicates whether the maid can handle instax/cheki requests.',
+      }),
   })
   .openapi({
     description: 'Maid resource representation.',
@@ -49,6 +55,7 @@ const mapMaid = (env: Bindings, maid: MaidRow) => ({
   id: maid.id,
   name: maid.name,
   image_url: maid.imageUrl ? buildR2PublicUrl(env, maid.imageUrl) : null,
+  is_instax_available: Boolean(maid.isInstaxAvailable),
 })
 
 const createMaidBodySchema = z
@@ -59,6 +66,14 @@ const createMaidBodySchema = z
       .openapi({
         example: 'Alice',
         description: 'Name to register for the maid.',
+      }),
+    is_instax_available: z
+      .boolean()
+      .optional()
+      .openapi({
+        example: true,
+        description: 'Whether the maid can handle instax/cheki requests. Defaults to false.',
+        default: false,
       }),
   })
   .openapi({
@@ -77,12 +92,22 @@ const updateMaidJsonBodySchema = z
         example: 'Alice',
         description: 'Updated maid name.',
       }),
+    is_instax_available: z
+      .boolean()
+      .optional()
+      .openapi({
+        example: false,
+        description: 'Updated instax/cheki availability flag.',
+      }),
   })
-  .refine((payload) => payload.name !== undefined, {
-    message: 'At least one field must be provided.',
-  })
+  .refine(
+    (payload) => payload.name !== undefined || payload.is_instax_available !== undefined,
+    {
+      message: 'At least one field must be provided.',
+    },
+  )
   .openapi({
-    description: 'JSON payload for updating a maid (name only).',
+    description: 'JSON payload for updating a maid.',
   })
 
 const maidApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
@@ -227,6 +252,11 @@ const updateMaidRouteDocs = describeRoute({
               format: 'binary',
               description: 'Image file for the maid.',
               example: 'maid-alice.jpg',
+            },
+            is_instax_available: {
+              type: 'boolean',
+              description: 'Flag indicating if the maid can handle instax/cheki requests.',
+              example: true,
             },
           },
         },
@@ -489,6 +519,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       .insert(maids)
       .values({
         name: parsed.data.name,
+        isInstaxAvailable: parsed.data.is_instax_available ?? false,
       })
       .returning()
 
@@ -509,6 +540,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     const contentType = c.req.header('content-type') ?? ''
     let name: string | undefined
     let imageFile: File | undefined
+    let isInstaxAvailable: boolean | undefined
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await c.req.parseBody()
@@ -522,7 +554,24 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
         imageFile = maybeImage
       }
 
-      if (!name && !imageFile) {
+      if ('is_instax_available' in formData) {
+        const raw = formData['is_instax_available']
+        if (typeof raw === 'string') {
+          const normalized = raw.trim().toLowerCase()
+          if (['true', '1', 'yes', 'on'].includes(normalized)) {
+            isInstaxAvailable = true
+          } else if (['false', '0', 'no', 'off'].includes(normalized)) {
+            isInstaxAvailable = false
+          } else {
+            return c.json(
+              createErrorResponse('Invalid is_instax_available value. Use true or false.'),
+              400,
+            )
+          }
+        }
+      }
+
+      if (!name && !imageFile && isInstaxAvailable === undefined) {
         return c.json(createErrorResponse('No updatable fields provided.'), 400)
       }
     } else {
@@ -539,6 +588,9 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       }
 
       name = parsed.data.name?.trim()
+      if (parsed.data.is_instax_available !== undefined) {
+        isInstaxAvailable = parsed.data.is_instax_available
+      }
     }
 
     const db = getDb(c.env)
@@ -554,6 +606,11 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
 
     if (name) {
       updateValues.name = name
+    }
+
+    if (isInstaxAvailable !== undefined) {
+      updateValues.isInstaxAvailable = isInstaxAvailable
+      existing.isInstaxAvailable = isInstaxAvailable
     }
 
     if (imageFile) {
