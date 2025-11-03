@@ -113,6 +113,23 @@ export const instaxes = sqliteTable(
   }),
 );
 
+export const instaxHistories = sqliteTable(
+  "instax_history",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    instaxId: integer("instax_id")
+      .notNull()
+      .references(() => instaxes.id, { onDelete: "cascade" }),
+    imageUrl: text("image_url").notNull(),
+    archivedAt: text("archived_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    instaxIdx: index("idx_instax_history_instax_id").on(table.instaxId),
+  }),
+);
+
 export const maidsRelations = relations(maids, ({ many }) => ({
   users: many(users, { relationName: "assignedMaid" }),
   instaxUsers: many(users, { relationName: "instaxMaid" }),
@@ -157,6 +174,13 @@ export const instaxesRelations = relations(instaxes, ({ one }) => ({
   maid: one(maids, {
     fields: [instaxes.maidId],
     references: [maids.id],
+  }),
+}));
+
+export const instaxHistoriesRelations = relations(instaxHistories, ({ one }) => ({
+  instax: one(instaxes, {
+    fields: [instaxHistories.instaxId],
+    references: [instaxes.id],
   }),
 }));
 

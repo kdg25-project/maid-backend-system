@@ -15,6 +15,13 @@
       "when": 1762044257858,
       "tag": "0001_loud_toad",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1762187091765,
+      "tag": "0002_greedy_bushwacker",
+      "breakpoints": true
     }
   ]
 }

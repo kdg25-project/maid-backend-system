@@ -1,16 +1,17 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
 import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
-import { instaxes } from '../../drizzle/schema'
+import { instaxes, instaxHistories } from '../../drizzle/schema'
 import { buildR2PublicUrl, deleteR2Object, uploadR2Object } from '../libs/storage'
+import { adminApiAuthMiddleware } from '../middlewares/adminApiAuth'
+import type { OpenAPIV3 } from 'openapi-types'
 
 type InstaxRow = typeof instaxes.$inferSelect
-
 const instaxSchema = z
   .object({
     id: z.number().int().openapi({
@@ -52,6 +53,68 @@ const mapInstax = (env: AppEnv['Bindings'], instax: InstaxRow) => ({
   maid_id: instax.maidId,
   image_url: instax.imageUrl ? buildR2PublicUrl(env, instax.imageUrl) : null,
   created_at: instax.createdAt,
+})
+
+const instaxHistorySchema = z
+  .object({
+    id: z.number().int().openapi({
+      example: 10,
+      description: 'Instax history identifier.',
+    }),
+    instax_id: z.number().int().openapi({
+      example: 3,
+      description: 'Associated instax record identifier.',
+    }),
+    user_id: z.number().int().openapi({
+      example: 101,
+      description: 'User identifier linked to the instax history.',
+    }),
+    maid_id: z.number().int().openapi({
+      example: 5,
+      description: 'Maid identifier linked to the instax history.',
+    }),
+    image_url: z
+      .string()
+      .openapi({
+        example: 'https://example.com/instax/history/1.jpg',
+        description: 'Public URL of the archived instax image.',
+      }),
+    archived_at: z
+      .string()
+      .openapi({
+        example: '2025-01-10T12:00:00.000Z',
+        description: 'Timestamp when the image was archived.',
+      }),
+  })
+  .openapi({
+    description: 'Instax history resource representation.',
+  })
+
+const instaxHistoryResponseSchema = successResponseSchema(instaxHistorySchema)
+
+const instaxHistoryListResponseSchema = successResponseSchema(
+  z.array(instaxHistorySchema).openapi({
+    description: 'List of instax history records.',
+  }),
+)
+
+const mapInstaxHistory = (
+  env: AppEnv['Bindings'],
+  row: {
+    id: number
+    instaxId: number
+    imageUrl: string
+    archivedAt: string
+    userId: number
+    maidId: number
+  },
+) => ({
+  id: row.id,
+  instax_id: row.instaxId,
+  user_id: row.userId,
+  maid_id: row.maidId,
+  image_url: buildR2PublicUrl(env, row.imageUrl),
+  archived_at: row.archivedAt,
 })
 
 const getInstaxRouteDocs = describeRoute({
@@ -247,6 +310,108 @@ const updateInstaxRouteDocs = describeRoute({
   },
 })
 
+const adminApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
+  AdminApiKey: [],
+}
+
+const listUserInstaxHistoryRouteDocs = describeRoute({
+  tags: ['Instax'],
+  summary: 'List instax history for a user (admin)',
+  description: 'Retrieve archived instax images for a specific user. Requires admin API key.',
+  parameters: [
+    {
+      name: 'userId',
+      in: 'path',
+      required: true,
+      description: 'User identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  security: [adminApiSecurityRequirement],
+  responses: {
+    200: {
+      description: 'Instax history list retrieved successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(instaxHistoryListResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid user identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
+const deleteInstaxHistoryRouteDocs = describeRoute({
+  tags: ['Instax'],
+  summary: 'Delete an instax history record (admin)',
+  description: 'Remove an archived instax image. Requires admin API key.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Instax history identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  security: [adminApiSecurityRequirement],
+  responses: {
+    200: {
+      description: 'Instax history deleted successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(instaxHistoryResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid history identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Instax history not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/instax/:id', getInstaxRouteDocs, async (c) => {
     const idParam = c.req.param('id')
@@ -357,8 +522,15 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
       return c.json(createErrorResponse('Instax not found.'), 404)
     }
 
+    const previousImageKey = existing.imageUrl
     const { key } = await uploadR2Object(c.env, `instax/${userId}`, instaxFile)
-    await deleteR2Object(c.env, existing.imageUrl)
+
+    if (previousImageKey) {
+      await db.insert(instaxHistories).values({
+        instaxId: existing.id,
+        imageUrl: previousImageKey,
+      })
+    }
 
     const [updated] = await db
       .update(instaxes)
@@ -370,6 +542,94 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
 
     return c.json(
       createSuccessResponse(mapInstax(c.env, result), 'Instax updated successfully.'),
+    )
+  })
+
+  app.get('/api/admin/users/:userId/instax-history', adminApiAuthMiddleware, listUserInstaxHistoryRouteDocs, async (c) => {
+    const userIdParam = c.req.param('userId')
+
+    if (!/^[1-9]\d*$/.test(userIdParam)) {
+      return c.json(createErrorResponse('Invalid user id.'), 400)
+    }
+
+    const userId = Number.parseInt(userIdParam, 10)
+    const db = getDb(c.env)
+
+    const rows = await db
+      .select({
+        id: instaxHistories.id,
+        instaxId: instaxHistories.instaxId,
+        imageUrl: instaxHistories.imageUrl,
+        archivedAt: instaxHistories.archivedAt,
+        userId: instaxes.userId,
+        maidId: instaxes.maidId,
+      })
+      .from(instaxHistories)
+      .innerJoin(instaxes, eq(instaxHistories.instaxId, instaxes.id))
+      .where(eq(instaxes.userId, userId))
+      .orderBy(desc(instaxHistories.archivedAt))
+      .all()
+
+    const result = rows.map((row) =>
+      mapInstaxHistory(c.env, {
+        id: row.id,
+        instaxId: row.instaxId,
+        imageUrl: row.imageUrl,
+        archivedAt: row.archivedAt,
+        userId: row.userId,
+        maidId: row.maidId,
+      }),
+    )
+
+    return c.json(createSuccessResponse(result))
+  })
+
+  app.delete('/api/admin/instax/history/:id', adminApiAuthMiddleware, deleteInstaxHistoryRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid instax history id.'), 400)
+    }
+
+    const historyId = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+
+    const records = await db
+      .select({
+        id: instaxHistories.id,
+        instaxId: instaxHistories.instaxId,
+        imageUrl: instaxHistories.imageUrl,
+        archivedAt: instaxHistories.archivedAt,
+        userId: instaxes.userId,
+        maidId: instaxes.maidId,
+      })
+      .from(instaxHistories)
+      .innerJoin(instaxes, eq(instaxHistories.instaxId, instaxes.id))
+      .where(eq(instaxHistories.id, historyId))
+      .limit(1)
+      .all()
+
+    const existing = records[0]
+
+    if (!existing) {
+      return c.json(createErrorResponse('Instax history not found.'), 404)
+    }
+
+    await db.delete(instaxHistories).where(eq(instaxHistories.id, historyId))
+    await deleteR2Object(c.env, existing.imageUrl)
+
+    return c.json(
+      createSuccessResponse(
+        mapInstaxHistory(c.env, {
+          id: existing.id,
+          instaxId: existing.instaxId,
+          imageUrl: existing.imageUrl,
+          archivedAt: existing.archivedAt,
+          userId: existing.userId,
+          maidId: existing.maidId,
+        }),
+        'Instax history deleted successfully.',
+      ),
     )
   })
 }
