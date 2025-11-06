@@ -12,6 +12,10 @@ export const openApiOptions: Partial<GenerateSpecOptions> = {
         url: 'https://api.kdgn.tech',
         description: 'Production server',
       },
+      {
+        url: 'http://localhost:8787',
+        description: 'Development server',
+      },
     ],
     components: {
       securitySchemes: {

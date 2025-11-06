@@ -172,13 +172,13 @@ const createUserRouteDocs = describeRoute({
   tags: ['Users'],
   summary: 'Register a user (entry registration)',
   description:
-    'Registers or updates a user entry with seat and maid assignment, marking the user as valid.',
+    'Registers a new user placeholder or re-registers an existing user by assigning seat and maid ids while marking the record as valid.',
   parameters: [
     {
       name: 'id',
       in: 'path',
       required: true,
-      description: 'User identifier.',
+      description: 'User identifier to create or update.',
       schema: {
         type: 'integer',
         minimum: 1,
@@ -190,15 +190,44 @@ const createUserRouteDocs = describeRoute({
     content: {
       'application/json': {
         schema: resolver(createUserBodySchema) as unknown as Record<string, unknown>,
+        examples: {
+          register: {
+            summary: 'Register or re-register user',
+            value: {
+              seat_id: 12,
+              maid_id: 5,
+            },
+          },
+        },
       },
     },
   },
   responses: {
     200: {
-      description: 'User registered successfully.',
+      description:
+        'User registered successfully. Returns the up-to-date user resource.',
       content: {
         'application/json': {
           schema: resolver(userResponseSchema),
+          examples: {
+            success: {
+              summary: 'Registered user response',
+              value: {
+                success: true,
+                message: 'User registered successfully.',
+                data: {
+                  id: 101,
+                  name: null,
+                  maid_id: 5,
+                  instax_maid_id: null,
+                  seat_id: 12,
+                  is_valid: true,
+                  created_at: '2025-01-15T10:00:00.000Z',
+                  updated_at: '2025-01-15T10:05:00.000Z',
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -260,7 +289,8 @@ const getUserRouteDocs = describeRoute({
 const updateUserRouteDocs = describeRoute({
   tags: ['Users'],
   summary: 'Update user details',
-  description: 'Update mutable fields for a user record.',
+  description:
+    'Updates mutable fields for a user record, allowing partial updates of name, maid assignments, seat, and validity.',
   parameters: [
     {
       name: 'id',
@@ -278,6 +308,23 @@ const updateUserRouteDocs = describeRoute({
     content: {
       'application/json': {
         schema: resolver(updateUserBodySchema) as unknown as Record<string, unknown>,
+        examples: {
+          updateAssignments: {
+            summary: 'Update name and assignments',
+            value: {
+              name: 'John Doe',
+              maid_id: 7,
+              instax_maid_id: null,
+              seat_id: 18,
+            },
+          },
+          deactivate: {
+            summary: 'Invalidate user',
+            value: {
+              is_valid: false,
+            },
+          },
+        },
       },
     },
   },
@@ -287,6 +334,25 @@ const updateUserRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(userResponseSchema),
+          examples: {
+            success: {
+              summary: 'Updated user response',
+              value: {
+                success: true,
+                message: 'User updated successfully.',
+                data: {
+                  id: 101,
+                  name: 'John Doe',
+                  maid_id: 7,
+                  instax_maid_id: null,
+                  seat_id: 18,
+                  is_valid: true,
+                  created_at: '2025-01-15T10:00:00.000Z',
+                  updated_at: '2025-01-15T12:00:00.000Z',
+                },
+              },
+            },
+          },
         },
       },
     },

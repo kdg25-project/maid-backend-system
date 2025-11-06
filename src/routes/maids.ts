@@ -162,7 +162,8 @@ const getMaidRouteDocs = describeRoute({
 const createMaidRouteDocs = describeRoute({
   tags: ['Maids'],
   summary: 'Create a maid',
-  description: 'Register a new maid profile by specifying the identifier up front.',
+  description:
+    'Register a new maid profile by specifying the identifier up front. Optional fields such as name and instax availability can be provided later; instax availability defaults to false when omitted.',
   parameters: [
     {
       name: 'id',
@@ -182,10 +183,14 @@ const createMaidRouteDocs = describeRoute({
         schema: resolver(createMaidBodySchema) as unknown as Record<string, unknown>,
         examples: {
           default: {
-            summary: 'Create maid placeholder',
+            summary: 'Create maid placeholder with instax flag',
             value: {
-              is_instax_available: false,
+              is_instax_available: true,
             },
+          },
+          minimal: {
+            summary: 'Create maid placeholder without optional fields',
+            value: {},
           },
         },
       },
@@ -556,14 +561,16 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     const trimmedName =
       parsed.data.name !== undefined ? parsed.data.name.trim() : undefined
 
-    const [inserted] = await db
-      .insert(maids)
-      .values({
-        id,
-        name: trimmedName ?? '',
-        isInstaxAvailable: parsed.data.is_instax_available ?? false,
-      })
-      .returning()
+    const insertValues: typeof maids.$inferInsert = {
+      id,
+      name: trimmedName ?? '',
+    }
+
+    if (parsed.data.is_instax_available !== undefined) {
+      insertValues.isInstaxAvailable = parsed.data.is_instax_available
+    }
+
+    const [inserted] = await db.insert(maids).values(insertValues).returning()
 
     return c.json(
       createSuccessResponse(mapMaid(c.env, inserted), 'Maid created successfully.'),
