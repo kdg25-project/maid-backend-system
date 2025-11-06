@@ -62,10 +62,11 @@ const createMaidBodySchema = z
   .object({
     name: z
       .string()
-      .min(1, { message: 'Name is required.' })
+      .min(1, { message: 'Name must not be empty when provided.' })
+      .optional()
       .openapi({
         example: 'Alice',
-        description: 'Name to register for the maid.',
+        description: 'Optional name to register for the maid. Can be provided later via update.',
       }),
     is_instax_available: z
       .boolean()
@@ -77,7 +78,7 @@ const createMaidBodySchema = z
       }),
   })
   .openapi({
-    description: 'Payload to create a maid.',
+    description: 'Payload to create a maid. All fields are optional.',
   })
 
 const createMaidResponseSchema = successResponseSchema(maidSchema)
@@ -161,17 +162,29 @@ const getMaidRouteDocs = describeRoute({
 const createMaidRouteDocs = describeRoute({
   tags: ['Maids'],
   summary: 'Create a maid',
-  description: 'Register a new maid profile.',
+  description: 'Register a new maid profile by specifying the identifier up front.',
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Maid identifier to reserve.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
   requestBody: {
-    required: true,
+    required: false,
     content: {
       'application/json': {
         schema: resolver(createMaidBodySchema) as unknown as Record<string, unknown>,
         examples: {
           default: {
-            summary: 'Create maid request',
+            summary: 'Create maid placeholder',
             value: {
-              name: 'Alice',
+              is_instax_available: false,
             },
           },
         },
@@ -189,7 +202,7 @@ const createMaidRouteDocs = describeRoute({
       },
     },
     400: {
-      description: 'Invalid request payload.',
+      description: 'Invalid request payload or identifier.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -198,6 +211,14 @@ const createMaidRouteDocs = describeRoute({
     },
     401: {
       description: 'Unauthorized. Missing or invalid x-api-key header.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    409: {
+      description: 'Maid identifier already exists.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -501,11 +522,19 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     return c.json(createSuccessResponse(mapMaid(c.env, maid)))
   })
 
-  app.post('/api/maids', maidApiAuthMiddleware, createMaidRouteDocs, async (c) => {
+  app.post('/api/maids/:id', maidApiAuthMiddleware, createMaidRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid maid id.'), 400)
+    }
+
     const body = await c.req
       .json()
-      .catch(() => null)
-    const parsed = createMaidBodySchema.safeParse(body)
+      .catch(() => ({}))
+
+    const payload = body ?? {}
+    const parsed = createMaidBodySchema.safeParse(payload)
 
     if (!parsed.success) {
       return c.json(
@@ -514,11 +543,24 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       )
     }
 
+    const id = Number.parseInt(idParam, 10)
     const db = getDb(c.env)
+    const existing = await db.query.maids.findFirst({
+      where: (fields, { eq }) => eq(fields.id, id),
+    })
+
+    if (existing) {
+      return c.json(createErrorResponse('Maid id already exists.'), 409)
+    }
+
+    const trimmedName =
+      parsed.data.name !== undefined ? parsed.data.name.trim() : undefined
+
     const [inserted] = await db
       .insert(maids)
       .values({
-        name: parsed.data.name,
+        id,
+        name: trimmedName ?? '',
         isInstaxAvailable: parsed.data.is_instax_available ?? false,
       })
       .returning()
