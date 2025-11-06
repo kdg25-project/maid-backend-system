@@ -155,6 +155,23 @@ const getMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(menuResponseSchema),
+          examples: {
+            success: {
+              summary: 'Menu response',
+              value: {
+                success: true,
+                message: 'OK',
+                data: {
+                  id: 1,
+                  name: 'Omurice',
+                  stock: 10,
+                  image_url: 'https://example.com/menus/1.jpg',
+                  created_at: '2025-01-15T12:30:00.000Z',
+                  updated_at: '2025-01-16T18:45:00.000Z',
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -163,6 +180,15 @@ const getMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
+          examples: {
+            invalidId: {
+              summary: 'Invalid id',
+              value: {
+                success: false,
+                message: 'Invalid menu id.',
+              },
+            },
+          },
         },
       },
     },
@@ -171,6 +197,15 @@ const getMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
+          examples: {
+            missing: {
+              summary: 'Menu missing',
+              value: {
+                success: false,
+                message: 'Menu not found.',
+              },
+            },
+          },
         },
       },
     },
@@ -200,6 +235,23 @@ const deleteMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(menuResponseSchema),
+          examples: {
+            success: {
+              summary: 'Deletion response',
+              value: {
+                success: true,
+                message: 'Menu deleted successfully.',
+                data: {
+                  id: 42,
+                  name: 'Limited Pancake',
+                  stock: 0,
+                  image_url: null,
+                  created_at: '2025-01-10T09:00:00.000Z',
+                  updated_at: '2025-01-12T09:00:00.000Z',
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -208,6 +260,15 @@ const deleteMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
+          examples: {
+            invalidId: {
+              summary: 'Invalid id',
+              value: {
+                success: false,
+                message: 'Invalid menu id.',
+              },
+            },
+          },
         },
       },
     },
@@ -216,6 +277,15 @@ const deleteMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
+          examples: {
+            unauthorized: {
+              summary: 'Missing API key',
+              value: {
+                success: false,
+                message: 'Unauthorized: Missing or invalid x-api-key header.',
+              },
+            },
+          },
         },
       },
     },
@@ -224,6 +294,15 @@ const deleteMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
+          examples: {
+            missing: {
+              summary: 'Already deleted',
+              value: {
+                success: false,
+                message: 'Menu not found.',
+              },
+            },
+          },
         },
       },
     },
@@ -329,6 +408,15 @@ const updateMenuRouteDocs = describeRoute({
     content: {
       'application/json': {
         schema: resolver(updateMenuJsonBodySchema) as unknown as Record<string, unknown>,
+        examples: {
+          updateStock: {
+            summary: 'Update stock and name via JSON',
+            value: {
+              name: 'Omurice (Cheese)',
+              stock: 8,
+            },
+          },
+        },
       },
       'multipart/form-data': {
         schema: {
@@ -362,6 +450,12 @@ const updateMenuRouteDocs = describeRoute({
               image: 'menu-seasonal.jpg',
             },
           },
+          stockOnly: {
+            summary: 'Update stock only (multipart)',
+            value: {
+              stock: 5,
+            },
+          },
         },
         encoding: {
           image: {
@@ -377,6 +471,23 @@ const updateMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(menuResponseSchema),
+          examples: {
+            success: {
+              summary: 'Updated menu response',
+              value: {
+                success: true,
+                message: 'Menu updated successfully.',
+                data: {
+                  id: 1,
+                  name: 'Omurice (Cheese)',
+                  stock: 8,
+                  image_url: 'https://example.com/menus/1.jpg',
+                  created_at: '2025-01-15T12:30:00.000Z',
+                  updated_at: '2025-01-16T18:45:00.000Z',
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -385,6 +496,15 @@ const updateMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
+          examples: {
+            invalidBody: {
+              summary: 'Missing payload',
+              value: {
+                success: false,
+                message: 'Invalid request body.',
+              },
+            },
+          },
         },
       },
     },
@@ -393,6 +513,15 @@ const updateMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
+          examples: {
+            unauthorized: {
+              summary: 'Missing API key',
+              value: {
+                success: false,
+                message: 'Unauthorized: Missing or invalid x-api-key header.',
+              },
+            },
+          },
         },
       },
     },
@@ -401,6 +530,15 @@ const updateMenuRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
+          examples: {
+            missing: {
+              summary: 'Menu not found',
+              value: {
+                success: false,
+                message: 'Menu not found.',
+              },
+            },
+          },
         },
       },
     },
