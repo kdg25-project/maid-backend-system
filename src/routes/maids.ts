@@ -61,6 +61,7 @@ const mapMaid = (env: Bindings, maid: MaidRow) => ({
   name: maid.name,
   image_url: maid.imageUrl ? buildR2PublicUrl(env, maid.imageUrl) : null,
   is_instax_available: Boolean(maid.isInstaxAvailable),
+  is_active: Boolean(maid.isActive),
 })
 
 const createMaidBodySchema = z
@@ -456,7 +457,13 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     parameters: [
       { name: 'page', in: 'query', required: false, description: 'Page number (1-based).', schema: { type: 'integer', minimum: 1, default: 1 } },
       { name: 'per_page', in: 'query', required: false, description: 'Items per page (max 100).', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
-      { name: 'is_active', in: 'query', required: false, description: 'Filter by active flag. true returns only active maids, false returns only inactive maids. If omitted defaults to true.', schema: { type: 'boolean', default: true } },
+      {
+        name: 'is_active',
+        in: 'query',
+        required: false,
+        description: 'Filter by active flag. true returns only active maids, false returns only inactive maids. When omitted no filtering is applied.',
+        schema: { type: 'boolean' },
+      },
     ],
     responses: {
       200: { description: 'List of maids.', content: { 'application/json': { schema: resolver(maidsListResponseSchema) } } },
@@ -475,7 +482,8 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
         return c.json(createErrorResponse('Invalid pagination parameters.'), 400)
       }
 
-      let isActiveFilter = true
+      let isActiveFilter: boolean | undefined
+      // なんか冗長で嫌いだけどまぁ、いいか
       if (typeof isActiveQuery !== 'undefined') {
         const val = String(isActiveQuery).trim().toLowerCase()
         if (['true', '1', 'yes'].includes(val)) {
@@ -490,14 +498,23 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       const offset = (page - 1) * per
       const db = getDb(c.env)
 
-      const rows = await db
-        .select()
-        .from(maids)
-        .where(eq(maids.isActive, isActiveFilter))
-        .limit(per)
-        .offset(offset)
-        .orderBy(maids.id)
-        .all()
+      const rows =
+        typeof isActiveFilter === 'undefined'
+          ? await db
+              .select()
+              .from(maids)
+              .limit(per)
+              .offset(offset)
+              .orderBy(maids.id)
+              .all()
+          : await db
+              .select()
+              .from(maids)
+              .where(eq(maids.isActive, isActiveFilter))
+              .limit(per)
+              .offset(offset)
+              .orderBy(maids.id)
+              .all()
 
       const result = rows.map((r) => mapMaid(c.env, r))
 
