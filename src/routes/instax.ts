@@ -9,6 +9,7 @@ import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { instaxes, instaxHistories } from '../../drizzle/schema'
 import { buildR2PublicUrl, deleteR2Object, uploadR2Object } from '../libs/storage'
 import { adminApiAuthMiddleware } from '../middlewares/adminApiAuth'
+import { maidApiAuthMiddleware } from '../middlewares/maidApiAuth'
 import type { OpenAPIV3 } from 'openapi-types'
 
 type InstaxRow = typeof instaxes.$inferSelect
@@ -131,6 +132,14 @@ const mapInstaxHistory = (
   archived_at: row.archivedAt,
 })
 
+const maidApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
+  MaidApiKey: [],
+}
+
+const adminApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
+  AdminApiKey: [],
+}
+
 const createInstaxRecord = async (
   env: AppEnv['Bindings'],
   db: Database,
@@ -248,6 +257,7 @@ const createInstaxRouteDocs = describeRoute({
       },
     },
   },
+  security: [maidApiSecurityRequirement],
   responses: {
     201: {
       description: 'Instax created successfully.',
@@ -319,6 +329,7 @@ const createInstaxBySeatRouteDocs = describeRoute({
       },
     },
   },
+  security: [maidApiSecurityRequirement],
   responses: {
     201: {
       description: 'Instax created successfully.',
@@ -398,6 +409,7 @@ const updateInstaxRouteDocs = describeRoute({
       },
     },
   },
+  security: [maidApiSecurityRequirement],
   responses: {
     200: {
       description: 'Instax updated successfully.',
@@ -425,10 +437,6 @@ const updateInstaxRouteDocs = describeRoute({
     },
   },
 })
-
-const adminApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
-  AdminApiKey: [],
-}
 
 const listUserInstaxHistoryRouteDocs = describeRoute({
   tags: ['Instax'],
@@ -549,7 +557,7 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
     return c.json(createSuccessResponse(mapInstax(c.env, instaxRecord)))
   })
 
-  app.post('/api/instax', createInstaxRouteDocs, async (c) => {
+  app.post('/api/instax', maidApiAuthMiddleware, createInstaxRouteDocs, async (c) => {
     const contentType = c.req.header('content-type') ?? ''
 
     if (!contentType.includes('multipart/form-data')) {
@@ -602,7 +610,7 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
     )
   })
 
-  app.post('/api/instax/by-seat', createInstaxBySeatRouteDocs, async (c) => {
+  app.post('/api/instax/by-seat', maidApiAuthMiddleware, createInstaxBySeatRouteDocs, async (c) => {
     const contentType = c.req.header('content-type') ?? ''
 
     if (!contentType.includes('multipart/form-data')) {
@@ -671,7 +679,7 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
     )
   })
 
-  app.patch('/api/instax', updateInstaxRouteDocs, async (c) => {
+  app.patch('/api/instax', maidApiAuthMiddleware, updateInstaxRouteDocs, async (c) => {
     const contentType = c.req.header('content-type') ?? ''
 
     if (!contentType.includes('multipart/form-data')) {
