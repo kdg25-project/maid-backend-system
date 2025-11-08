@@ -7,11 +7,17 @@ import { getDb } from '../libs/db'
 import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { users } from '../../drizzle/schema'
+import { maidApiAuthMiddleware } from '../middlewares/maidApiAuth'
+import type { OpenAPIV3 } from 'openapi-types'
 
 type UserRow = typeof users.$inferSelect
 type Database = ReturnType<typeof getDb>
 
 const userIdParamSchema = z.string().uuid()
+const seatIdParamSchema = z
+  .coerce.number()
+  .int({ message: 'seat id must be an integer.' })
+  .min(1, { message: 'seat id must be greater than zero.' })
 
 const normalizeNullableString = (value: string | null | undefined) =>
   value && value.trim().length > 0 ? value : null
@@ -348,6 +354,56 @@ const getUserRouteDocs = describeRoute({
   },
 })
 
+const maidApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
+  MaidApiKey: [],
+}
+
+const getUserBySeatRouteDocs = describeRoute({
+  tags: ['Users'],
+  summary: 'Fetch user by seat',
+  description:
+    'Retrieve the most recently updated valid user currently assigned to the specified seat.',
+  parameters: [
+    {
+      name: 'seatId',
+      in: 'path',
+      required: true,
+      description: 'Seat identifier.',
+      schema: {
+        type: 'integer',
+        minimum: 1,
+      },
+    },
+  ],
+  security: [maidApiSecurityRequirement],
+  responses: {
+    200: {
+      description: 'User occupying the seat.',
+      content: {
+        'application/json': {
+          schema: resolver(userResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid seat identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Seat has no active user.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 const updateUserRouteDocs = describeRoute({
   tags: ['Users'],
   summary: 'Update user details',
@@ -452,6 +508,30 @@ const mapUser = (user: UserRow) => ({
 })
 
 export const registerUserRoutes = (app: Hono<AppEnv>) => {
+  app.get('/api/users/seat/:seatId', maidApiAuthMiddleware, getUserBySeatRouteDocs, async (c) => {
+    const seatParam = c.req.param('seatId')
+
+    const seatResult = seatIdParamSchema.safeParse(seatParam)
+    if (!seatResult.success) {
+      return c.json(createErrorResponse('Invalid seat id.'), 400)
+    }
+
+    const seatId = seatResult.data
+    const db = getDb(c.env)
+
+    const user = await db.query.users.findFirst({
+      where: (fields, { eq, and }) =>
+        and(eq(fields.seatId, seatId), eq(fields.isValid, true)),
+      orderBy: (fields, { desc }) => desc(fields.updatedAt),
+    })
+
+    if (!user) {
+      return c.json(createErrorResponse('No active user found for the specified seat.'), 404)
+    }
+
+    return c.json(createSuccessResponse(mapUser(user)))
+  })
+
   app.get('/api/users/:id', getUserRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
