@@ -9,7 +9,7 @@ import {
 const orderStateEnum = ["pending", "preparing", "served"] as const;
 
 export const maids = sqliteTable("maid", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+  id: text("id").primaryKey(),
   name: text("name").notNull(),
   imageUrl: text("image_url"),
   isActive: integer("is_active", { mode: "boolean" })
@@ -23,11 +23,12 @@ export const maids = sqliteTable("maid", {
 export const users = sqliteTable(
   "user",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: text("id").primaryKey(),
     name: text("name").notNull(),
-    maidId: integer("maid_id")
+    status: text("status"),
+    maidId: text("maid_id")
       .references(() => maids.id, { onDelete: "set null" }),
-    instaxMaidId: integer("instax_maid_id")
+    instaxMaidId: text("instax_maid_id")
       .references(() => maids.id, { onDelete: "set null" }),
     seatId: integer("seat_id"),
     isValid: integer("is_valid", { mode: "boolean" })
@@ -70,7 +71,7 @@ export const orders = sqliteTable(
   "order",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    userId: integer("user_id")
+    userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     menuId: integer("menu_id")
@@ -96,10 +97,10 @@ export const instaxes = sqliteTable(
   "instax",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    userId: integer("user_id")
+    userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    maidId: integer("maid_id")
+    maidId: text("maid_id")
       .notNull()
       .references(() => maids.id, { onDelete: "cascade" }),
     imageUrl: text("image_url"),

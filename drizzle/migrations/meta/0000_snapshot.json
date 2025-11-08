@@ -1,9 +1,70 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e304fa66-c202-443a-8032-9f91c6cc0723",
+  "id": "6624bf68-69d8-4cdd-8722-a447247c665f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
+    "instax_history": {
+      "name": "instax_history",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "instax_id": {
+          "name": "instax_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "image_url": {
+          "name": "image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "idx_instax_history_instax_id": {
+          "name": "idx_instax_history_instax_id",
+          "columns": [
+            "instax_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "instax_history_instax_id_instax_id_fk": {
+          "name": "instax_history_instax_id_instax_id_fk",
+          "tableFrom": "instax_history",
+          "tableTo": "instax",
+          "columnsFrom": [
+            "instax_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "instax": {
       "name": "instax",
       "columns": {
@@ -16,14 +77,14 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "integer",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "maid_id": {
           "name": "maid_id",
-          "type": "integer",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -97,10 +158,10 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "integer",
+          "type": "text",
           "primaryKey": true,
           "notNull": true,
-          "autoincrement": true
+          "autoincrement": false
         },
         "name": {
           "name": "name",
@@ -118,6 +179,14 @@
         },
         "is_active": {
           "name": "is_active",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "is_instax_available": {
+          "name": "is_instax_available",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -206,7 +275,7 @@
         },
         "user_id": {
           "name": "user_id",
-          "type": "integer",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -296,10 +365,10 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "integer",
+          "type": "text",
           "primaryKey": true,
           "notNull": true,
-          "autoincrement": true
+          "autoincrement": false
         },
         "name": {
           "name": "name",
@@ -308,16 +377,23 @@
           "notNull": true,
           "autoincrement": false
         },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "maid_id": {
           "name": "maid_id",
-          "type": "integer",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "instax_maid_id": {
           "name": "instax_maid_id",
-          "type": "integer",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

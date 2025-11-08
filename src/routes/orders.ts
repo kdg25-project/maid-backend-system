@@ -10,6 +10,7 @@ import { orders } from '../../drizzle/schema'
 import type { OpenAPIV3 } from 'openapi-types'
 
 type OrderRow = typeof orders.$inferSelect
+const userIdParamSchema = z.string().uuid()
 
 const orderStateSchema = z.enum(['pending', 'preparing', 'served']).openapi({
   description: 'Order state value.',
@@ -22,10 +23,13 @@ const orderSchema = z
       example: 1,
       description: 'Order identifier.',
     }),
-    user_id: z.number().int().openapi({
-      example: 101,
-      description: 'User identifier associated with the order.',
-    }),
+    user_id: z
+      .string()
+      .uuid()
+      .openapi({
+        example: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
+        description: 'User identifier associated with the order.',
+      }),
     menu_id: z.number().int().openapi({
       example: 15,
       description: 'Menu identifier for the order.',
@@ -63,11 +67,10 @@ const orderResponseSchema = successResponseSchema(orderSchema)
 const createOrderBodySchema = z
   .object({
     user_id: z
-      .number()
-      .int({ message: 'user_id must be an integer.' })
-      .min(1, { message: 'user_id must be greater than zero.' })
+      .string({ required_error: 'user_id is required.' })
+      .uuid({ message: 'user_id must be a valid UUID.' })
       .openapi({
-        example: 101,
+        example: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
         description: 'Identifier of the user placing the order.',
       }),
     menu_id: z
@@ -192,8 +195,8 @@ const getOrdersByUserRouteDocs = describeRoute({
       required: true,
       description: 'User identifier.',
       schema: {
-        type: 'integer',
-        minimum: 1,
+        type: 'string',
+        format: 'uuid',
       },
     },
   ],
@@ -311,11 +314,12 @@ export const registerOrderRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/orders/users/:id', getOrdersByUserRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
-    if (!/^[1-9]\d*$/.test(idParam)) {
+    const idResult = userIdParamSchema.safeParse(idParam)
+    if (!idResult.success) {
       return c.json(createErrorResponse('Invalid user id.'), 400)
     }
 
-    const userId = Number.parseInt(idParam, 10)
+    const userId = idResult.data
     const db = getDb(c.env)
     const orderList = await db.query.orders.findMany({
       where: (fields, { eq: equals }) => equals(fields.userId, userId),

@@ -1,1 +1,0 @@
-ALTER TABLE `maid` ADD `is_instax_available` integer DEFAULT false NOT NULL;

@@ -13,10 +13,13 @@ import { maidApiAuthMiddleware } from '../middlewares/maidApiAuth'
 
 const maidSchema = z
   .object({
-    id: z.number().int().openapi({
-      example: 1,
-      description: 'Unique maid identifier.',
-    }),
+    id: z
+      .string()
+      .uuid()
+      .openapi({
+        example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+        description: 'Unique maid identifier.',
+      }),
     name: z.string().openapi({
       example: 'Alice',
       description: 'Maid display name.',
@@ -50,6 +53,8 @@ const maidsListResponseSchema = successResponseSchema(maidsListSchema)
 
 type Bindings = AppEnv['Bindings']
 type MaidRow = typeof maids.$inferSelect
+
+const maidIdParamSchema = z.string().uuid()
 
 const mapMaid = (env: Bindings, maid: MaidRow) => ({
   id: maid.id,
@@ -126,8 +131,8 @@ const getMaidRouteDocs = describeRoute({
       required: true,
       description: 'Maid identifier.',
       schema: {
-        type: 'integer',
-        minimum: 1,
+        type: 'string',
+        format: 'uuid',
       },
     },
   ],
@@ -171,8 +176,8 @@ const createMaidRouteDocs = describeRoute({
       required: true,
       description: 'Maid identifier to reserve.',
       schema: {
-        type: 'integer',
-        minimum: 1,
+        type: 'string',
+        format: 'uuid',
       },
     },
   ],
@@ -245,8 +250,8 @@ const updateMaidRouteDocs = describeRoute({
       required: true,
       description: 'Maid identifier.',
       schema: {
-        type: 'integer',
-        minimum: 1,
+        type: 'string',
+        format: 'uuid',
       },
     },
   ],
@@ -351,8 +356,8 @@ const deleteMaidRouteDocs = describeRoute({
       required: true,
       description: 'Maid identifier.',
       schema: {
-        type: 'integer',
-        minimum: 1,
+        type: 'string',
+        format: 'uuid',
       },
     },
   ],
@@ -427,7 +432,7 @@ const toggleMaidActiveRouteDocs = describeRoute({
       in: 'path',
       required: true,
       description: 'Maid identifier.',
-      schema: { type: 'integer', minimum: 1 },
+      schema: { type: 'string', format: 'uuid' },
     },
   ],
   requestBody: {
@@ -509,11 +514,12 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/maids/:id', getMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
-    if (!/^[1-9]\d*$/.test(idParam)) {
+    const idResult = maidIdParamSchema.safeParse(idParam)
+    if (!idResult.success) {
       return c.json(createErrorResponse('Invalid maid id.'), 400)
     }
 
-    const id = Number.parseInt(idParam, 10)
+    const id = idResult.data
 
     const db = getDb(c.env)
     const maid = await db.query.maids.findFirst({
@@ -530,7 +536,8 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
   app.post('/api/maids/:id', maidApiAuthMiddleware, createMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
-    if (!/^[1-9]\d*$/.test(idParam)) {
+    const idResult = maidIdParamSchema.safeParse(idParam)
+    if (!idResult.success) {
       return c.json(createErrorResponse('Invalid maid id.'), 400)
     }
 
@@ -548,7 +555,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       )
     }
 
-    const id = Number.parseInt(idParam, 10)
+    const id = idResult.data
     const db = getDb(c.env)
     const existing = await db.query.maids.findFirst({
       where: (fields, { eq }) => eq(fields.id, id),
@@ -581,11 +588,12 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
   app.patch('/api/maids/:id', maidApiAuthMiddleware, updateMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
-    if (!/^[1-9]\d*$/.test(idParam)) {
+    const idResult = maidIdParamSchema.safeParse(idParam)
+    if (!idResult.success) {
       return c.json(createErrorResponse('Invalid maid id.'), 400)
     }
 
-    const id = Number.parseInt(idParam, 10)
+    const id = idResult.data
     const contentType = c.req.header('content-type') ?? ''
     let name: string | undefined
     let imageFile: File | undefined
@@ -695,11 +703,12 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
   // 管理: メイドの公開フラグを切り替えるエンドポイント
   app.patch('/api/maids/:id/active', maidApiAuthMiddleware, toggleMaidActiveBodyValidator, toggleMaidActiveRouteDocs, async (c) => {
     const idParam = c.req.param('id')
-    if (!/^[1-9]\d*$/.test(idParam)) {
+    const idResult = maidIdParamSchema.safeParse(idParam)
+    if (!idResult.success) {
       return c.json(createErrorResponse('Invalid maid id.'), 400)
     }
 
-    const id = Number.parseInt(idParam, 10)
+    const id = idResult.data
 
     const parsed = c.req.valid('json')
 
@@ -718,11 +727,12 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
   app.delete('/api/maids/:id', maidApiAuthMiddleware, deleteMaidRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
-    if (!/^[1-9]\d*$/.test(idParam)) {
+    const idResult = maidIdParamSchema.safeParse(idParam)
+    if (!idResult.success) {
       return c.json(createErrorResponse('Invalid maid id.'), 400)
     }
 
-    const id = Number.parseInt(idParam, 10)
+    const id = idResult.data
     const db = getDb(c.env)
 
     const existing = await db.query.maids.findFirst({

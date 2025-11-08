@@ -9,16 +9,36 @@ import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
 import { users } from '../../drizzle/schema'
 
 type UserRow = typeof users.$inferSelect
+type Database = ReturnType<typeof getDb>
+
+const userIdParamSchema = z.string().uuid()
 
 const normalizeNullableString = (value: string | null | undefined) =>
   value && value.trim().length > 0 ? value : null
 
+const sanitizeStatus = (value: string | null | undefined) => {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+const statusInputSchema = z
+  .string()
+  .max(200, { message: 'status must be at most 200 characters.' })
+  .refine((val) => val.trim().length > 0, {
+    message: 'status must not be empty when provided.',
+  })
+
 const userSchema = z
   .object({
-    id: z.number().int().openapi({
-      example: 101,
-      description: 'User identifier.',
-    }),
+    id: z
+      .string()
+      .uuid()
+      .openapi({
+        example: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
+        description: 'User identifier.',
+      }),
     name: z
       .string()
       .nullable()
@@ -27,18 +47,26 @@ const userSchema = z
         description: 'User name if registered.',
         nullable: true,
       }),
-    maid_id: z
-      .number()
-      .int()
+    status: z
+      .string()
       .nullable()
       .openapi({
-        example: 5,
+        example: 'Waiting for order.',
+        description: 'Current free-form status text for the user.',
+        nullable: true,
+      }),
+    maid_id: z
+      .string()
+      .uuid()
+      .nullable()
+      .openapi({
+        example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
         description: 'Assigned maid identifier.',
         nullable: true,
       }),
     instax_maid_id: z
-      .number()
-      .int()
+      .string()
+      .uuid()
       .nullable()
       .openapi({
         example: null,
@@ -79,6 +107,26 @@ const userSchema = z
 
 const userResponseSchema = successResponseSchema(userSchema)
 
+const validateMaidReference = async (
+  db: Database,
+  maidId: string | null | undefined,
+  fieldName: 'maid_id' | 'instax_maid_id',
+) => {
+  if (maidId === undefined || maidId === null) {
+    return null
+  }
+
+  const maid = await db.query.maids.findFirst({
+    where: (fields, { eq: equals }) => equals(fields.id, maidId),
+  })
+
+  if (!maid) {
+    return `${fieldName} does not reference an existing maid.`
+  }
+
+  return null
+}
+
 const createUserBodySchema = z
   .object({
     seat_id: z
@@ -90,12 +138,17 @@ const createUserBodySchema = z
         description: 'Seat identifier assigned to the user.',
       }),
     maid_id: z
-      .number()
-      .int({ message: 'maid_id must be an integer.' })
-      .min(1, { message: 'maid_id must be greater than zero.' })
+      .string({ required_error: 'maid_id is required.' })
+      .uuid({ message: 'maid_id must be a valid UUID.' })
       .openapi({
-        example: 5,
+        example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
         description: 'Maid identifier responsible for the user.',
+      }),
+    status: statusInputSchema
+      .optional()
+      .openapi({
+        example: 'Waiting at entrance.',
+        description: 'Optional current status text to store for the user.',
       }),
   })
   .openapi({
@@ -113,20 +166,18 @@ const updateUserBodySchema = z
         description: 'Updated user name.',
       }),
     maid_id: z
-      .number()
-      .int({ message: 'maid_id must be an integer.' })
-      .min(1, { message: 'maid_id must be greater than zero.' })
+      .string()
+      .uuid({ message: 'maid_id must be a valid UUID.' })
       .nullable()
       .optional()
       .openapi({
-        example: 5,
+        example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
         description: 'Updated assigned maid id.',
         nullable: true,
       }),
     instax_maid_id: z
-      .number()
-      .int({ message: 'instax_maid_id must be an integer.' })
-      .min(1, { message: 'instax_maid_id must be greater than zero.' })
+      .string()
+      .uuid({ message: 'instax_maid_id must be a valid UUID.' })
       .nullable()
       .optional()
       .openapi({
@@ -145,6 +196,14 @@ const updateUserBodySchema = z
         description: 'Updated seat id.',
         nullable: true,
       }),
+    status: statusInputSchema
+      .nullable()
+      .optional()
+      .openapi({
+        example: 'Serving Omurice.',
+        description: 'Updated status text (null to clear).',
+        nullable: true,
+      }),
     is_valid: z
       .boolean()
       .optional()
@@ -159,6 +218,7 @@ const updateUserBodySchema = z
       payload.maid_id !== undefined ||
       payload.instax_maid_id !== undefined ||
       payload.seat_id !== undefined ||
+      payload.status !== undefined ||
       payload.is_valid !== undefined,
     {
       message: 'At least one field must be provided.',
@@ -180,8 +240,8 @@ const createUserRouteDocs = describeRoute({
       required: true,
       description: 'User identifier to create or update.',
       schema: {
-        type: 'integer',
-        minimum: 1,
+        type: 'string',
+        format: 'uuid',
       },
     },
   ],
@@ -195,7 +255,8 @@ const createUserRouteDocs = describeRoute({
             summary: 'Register or re-register user',
             value: {
               seat_id: 12,
-              maid_id: 5,
+              maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+              status: 'Waiting at entrance.',
             },
           },
         },
@@ -216,9 +277,10 @@ const createUserRouteDocs = describeRoute({
                 success: true,
                 message: 'User registered successfully.',
                 data: {
-                  id: 101,
+                  id: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
                   name: null,
-                  maid_id: 5,
+                  status: 'Waiting at entrance.',
+                  maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
                   instax_maid_id: null,
                   seat_id: 12,
                   is_valid: true,
@@ -253,8 +315,8 @@ const getUserRouteDocs = describeRoute({
       required: true,
       description: 'User identifier.',
       schema: {
-        type: 'integer',
-        minimum: 1,
+        type: 'string',
+        format: 'uuid',
       },
     },
   ],
@@ -298,8 +360,8 @@ const updateUserRouteDocs = describeRoute({
       required: true,
       description: 'User identifier.',
       schema: {
-        type: 'integer',
-        minimum: 1,
+        type: 'string',
+        format: 'uuid',
       },
     },
   ],
@@ -313,9 +375,10 @@ const updateUserRouteDocs = describeRoute({
             summary: 'Update name and assignments',
             value: {
               name: 'John Doe',
-              maid_id: 7,
+              maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
               instax_maid_id: null,
               seat_id: 18,
+              status: 'Enjoying parfait.',
             },
           },
           deactivate: {
@@ -341,9 +404,10 @@ const updateUserRouteDocs = describeRoute({
                 success: true,
                 message: 'User updated successfully.',
                 data: {
-                  id: 101,
+                  id: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
                   name: 'John Doe',
-                  maid_id: 7,
+                  status: 'Enjoying parfait.',
+                  maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
                   instax_maid_id: null,
                   seat_id: 18,
                   is_valid: true,
@@ -378,6 +442,7 @@ const updateUserRouteDocs = describeRoute({
 const mapUser = (user: UserRow) => ({
   id: user.id,
   name: normalizeNullableString(user.name),
+  status: normalizeNullableString(user.status),
   maid_id: user.maidId ?? null,
   instax_maid_id: user.instaxMaidId ?? null,
   seat_id: user.seatId ?? null,
@@ -390,11 +455,12 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/users/:id', getUserRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
-    if (!/^[1-9]\d*$/.test(idParam)) {
+    const idResult = userIdParamSchema.safeParse(idParam)
+    if (!idResult.success) {
       return c.json(createErrorResponse('Invalid user id.'), 400)
     }
 
-    const id = Number.parseInt(idParam, 10)
+    const id = idResult.data
     const db = getDb(c.env)
     const user = await db.query.users.findFirst({
       where: (fields, { eq: equals }) => equals(fields.id, id),
@@ -410,7 +476,8 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
   app.post('/api/users/:id', createUserRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
-    if (!/^[1-9]\d*$/.test(idParam)) {
+    const idResult = userIdParamSchema.safeParse(idParam)
+    if (!idResult.success) {
       return c.json(createErrorResponse('Invalid user id.'), 400)
     }
 
@@ -426,36 +493,45 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
       )
     }
 
-    const id = Number.parseInt(idParam, 10)
+    const id = idResult.data
     const db = getDb(c.env)
+
+    const maidValidationError = await validateMaidReference(db, parsed.data.maid_id, 'maid_id')
+    if (maidValidationError) {
+      return c.json(createErrorResponse(maidValidationError), 400)
+    }
 
     const existing = await db.query.users.findFirst({
       where: (fields, { eq: equals }) => equals(fields.id, id),
     })
 
     const now = new Date().toISOString()
+    const sanitizedStatus = sanitizeStatus(parsed.data.status)
 
     if (existing) {
+      const updatePayload: Partial<typeof users.$inferInsert> = {
+        maidId: parsed.data.maid_id,
+        seatId: parsed.data.seat_id,
+        instaxMaidId: null,
+        isValid: true,
+        name: existing.name ?? '',
+        updatedAt: now,
+      }
+
+      if (sanitizedStatus !== undefined) {
+        updatePayload.status = sanitizedStatus
+        existing.status = sanitizedStatus ?? null
+      }
+
       const [updated] = await db
         .update(users)
-        .set({
-          maidId: parsed.data.maid_id,
-          seatId: parsed.data.seat_id,
-          instaxMaidId: null,
-          isValid: true,
-          name: existing.name ?? '',
-          updatedAt: now,
-        })
+        .set(updatePayload)
         .where(eq(users.id, id))
         .returning()
 
       const result = updated ?? {
         ...existing,
-        maidId: parsed.data.maid_id,
-        seatId: parsed.data.seat_id,
-        instaxMaidId: null,
-        isValid: true,
-        updatedAt: now,
+        ...updatePayload,
       }
 
       return c.json(
@@ -463,16 +539,22 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
       )
     }
 
+    const insertValues: typeof users.$inferInsert = {
+      id,
+      maidId: parsed.data.maid_id,
+      seatId: parsed.data.seat_id,
+      instaxMaidId: null,
+      isValid: true,
+      name: '',
+    }
+
+    if (sanitizedStatus !== undefined) {
+      insertValues.status = sanitizedStatus
+    }
+
     const [inserted] = await db
       .insert(users)
-      .values({
-        id,
-        maidId: parsed.data.maid_id,
-        seatId: parsed.data.seat_id,
-        instaxMaidId: null,
-        isValid: true,
-        name: '',
-      })
+      .values(insertValues)
       .returning()
 
     return c.json(
@@ -483,7 +565,8 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
   app.patch('/api/users/:id', updateUserRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
-    if (!/^[1-9]\d*$/.test(idParam)) {
+    const idResult = userIdParamSchema.safeParse(idParam)
+    if (!idResult.success) {
       return c.json(createErrorResponse('Invalid user id.'), 400)
     }
 
@@ -499,7 +582,7 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
       )
     }
 
-    const id = Number.parseInt(idParam, 10)
+    const id = idResult.data
     const db = getDb(c.env)
     const existing = await db.query.users.findFirst({
       where: (fields, { eq: equals }) => equals(fields.id, id),
@@ -507,6 +590,20 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
 
     if (!existing) {
       return c.json(createErrorResponse('User not found.'), 404)
+    }
+
+    const maidValidationError = await validateMaidReference(db, parsed.data.maid_id, 'maid_id')
+    if (maidValidationError) {
+      return c.json(createErrorResponse(maidValidationError), 400)
+    }
+
+    const instaxMaidValidationError = await validateMaidReference(
+      db,
+      parsed.data.instax_maid_id,
+      'instax_maid_id',
+    )
+    if (instaxMaidValidationError) {
+      return c.json(createErrorResponse(instaxMaidValidationError), 400)
     }
 
     const updateValues: Partial<typeof users.$inferInsert> = {}
@@ -529,6 +626,12 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
     if (parsed.data.seat_id !== undefined) {
       updateValues.seatId = parsed.data.seat_id ?? null
       existing.seatId = parsed.data.seat_id ?? null
+    }
+
+    if (parsed.data.status !== undefined) {
+      const sanitized = sanitizeStatus(parsed.data.status)
+      updateValues.status = sanitized ?? null
+      existing.status = sanitized ?? null
     }
 
     if (parsed.data.is_valid !== undefined) {

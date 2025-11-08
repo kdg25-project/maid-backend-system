@@ -12,20 +12,27 @@ import { adminApiAuthMiddleware } from '../middlewares/adminApiAuth'
 import type { OpenAPIV3 } from 'openapi-types'
 
 type InstaxRow = typeof instaxes.$inferSelect
+const uuidStringSchema = z.string().uuid()
 const instaxSchema = z
   .object({
     id: z.number().int().openapi({
       example: 1,
       description: 'Instax identifier.',
     }),
-    user_id: z.number().int().openapi({
-      example: 101,
-      description: 'Identifier of the user associated with the instax.',
-    }),
-    maid_id: z.number().int().openapi({
-      example: 5,
-      description: 'Identifier of the maid associated with the instax.',
-    }),
+    user_id: z
+      .string()
+      .uuid()
+      .openapi({
+        example: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
+        description: 'Identifier of the user associated with the instax.',
+      }),
+    maid_id: z
+      .string()
+      .uuid()
+      .openapi({
+        example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+        description: 'Identifier of the maid associated with the instax.',
+      }),
     image_url: z
       .string()
       .nullable()
@@ -65,14 +72,20 @@ const instaxHistorySchema = z
       example: 3,
       description: 'Associated instax record identifier.',
     }),
-    user_id: z.number().int().openapi({
-      example: 101,
-      description: 'User identifier linked to the instax history.',
-    }),
-    maid_id: z.number().int().openapi({
-      example: 5,
-      description: 'Maid identifier linked to the instax history.',
-    }),
+    user_id: z
+      .string()
+      .uuid()
+      .openapi({
+        example: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
+        description: 'User identifier linked to the instax history.',
+      }),
+    maid_id: z
+      .string()
+      .uuid()
+      .openapi({
+        example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+        description: 'Maid identifier linked to the instax history.',
+      }),
     image_url: z
       .string()
       .openapi({
@@ -105,8 +118,8 @@ const mapInstaxHistory = (
     instaxId: number
     imageUrl: string
     archivedAt: string
-    userId: number
-    maidId: number
+    userId: string
+    maidId: string
   },
 ) => ({
   id: row.id,
@@ -173,16 +186,16 @@ const createInstaxRouteDocs = describeRoute({
           type: 'object',
           properties: {
             user_id: {
-              type: 'integer',
-              minimum: 1,
+              type: 'string',
+              format: 'uuid',
               description: 'User identifier.',
-              example: 101,
+              example: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
             },
             maid_id: {
-              type: 'integer',
-              minimum: 1,
+              type: 'string',
+              format: 'uuid',
               description: 'Maid identifier.',
-              example: 5,
+              example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
             },
             instax: {
               type: 'string',
@@ -197,8 +210,8 @@ const createInstaxRouteDocs = describeRoute({
           default: {
             summary: 'Sample instax upload',
             value: {
-              user_id: 101,
-              maid_id: 5,
+              user_id: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
+              maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
               instax: 'instax-sample.jpg',
             },
           },
@@ -244,16 +257,16 @@ const updateInstaxRouteDocs = describeRoute({
           type: 'object',
           properties: {
             user_id: {
-              type: 'integer',
-              minimum: 1,
+              type: 'string',
+              format: 'uuid',
               description: 'User identifier.',
-              example: 101,
+              example: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
             },
             maid_id: {
-              type: 'integer',
-              minimum: 1,
+              type: 'string',
+              format: 'uuid',
               description: 'Maid identifier.',
-              example: 5,
+              example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
             },
             instax: {
               type: 'string',
@@ -268,8 +281,8 @@ const updateInstaxRouteDocs = describeRoute({
           default: {
             summary: 'Replace instax image',
             value: {
-              user_id: 101,
-              maid_id: 5,
+              user_id: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
+              maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
               instax: 'instax-replacement.jpg',
             },
           },
@@ -325,8 +338,8 @@ const listUserInstaxHistoryRouteDocs = describeRoute({
       required: true,
       description: 'User identifier.',
       schema: {
-        type: 'integer',
-        minimum: 1,
+        type: 'string',
+        format: 'uuid',
       },
     },
   ],
@@ -448,20 +461,30 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
     const maidIdRaw = formData['maid_id']
     const instaxFile = formData['instax']
 
-    if (typeof userIdRaw !== 'string' || !/^[1-9]\d*$/.test(userIdRaw)) {
-      return c.json(createErrorResponse('user_id must be a positive integer.'), 400)
+    if (typeof userIdRaw !== 'string') {
+      return c.json(createErrorResponse('user_id must be provided.'), 400)
     }
 
-    if (typeof maidIdRaw !== 'string' || !/^[1-9]\d*$/.test(maidIdRaw)) {
-      return c.json(createErrorResponse('maid_id must be a positive integer.'), 400)
+    if (typeof maidIdRaw !== 'string') {
+      return c.json(createErrorResponse('maid_id must be provided.'), 400)
+    }
+
+    const userIdResult = uuidStringSchema.safeParse(userIdRaw.trim())
+    if (!userIdResult.success) {
+      return c.json(createErrorResponse('user_id must be a valid UUID.'), 400)
+    }
+
+    const maidIdResult = uuidStringSchema.safeParse(maidIdRaw.trim())
+    if (!maidIdResult.success) {
+      return c.json(createErrorResponse('maid_id must be a valid UUID.'), 400)
     }
 
     if (!(instaxFile instanceof File) || instaxFile.size === 0) {
       return c.json(createErrorResponse('instax file is required.'), 400)
     }
 
-    const userId = Number.parseInt(userIdRaw, 10)
-    const maidId = Number.parseInt(maidIdRaw, 10)
+    const userId = userIdResult.data
+    const maidId = maidIdResult.data
 
     const { key } = await uploadR2Object(c.env, `instax/${userId}`, instaxFile)
 
@@ -496,20 +519,30 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
     const maidIdRaw = formData['maid_id']
     const instaxFile = formData['instax']
 
-    if (typeof userIdRaw !== 'string' || !/^[1-9]\d*$/.test(userIdRaw)) {
-      return c.json(createErrorResponse('user_id must be a positive integer.'), 400)
+    if (typeof userIdRaw !== 'string') {
+      return c.json(createErrorResponse('user_id must be provided.'), 400)
     }
 
-    if (typeof maidIdRaw !== 'string' || !/^[1-9]\d*$/.test(maidIdRaw)) {
-      return c.json(createErrorResponse('maid_id must be a positive integer.'), 400)
+    if (typeof maidIdRaw !== 'string') {
+      return c.json(createErrorResponse('maid_id must be provided.'), 400)
+    }
+
+    const userIdResult = uuidStringSchema.safeParse(userIdRaw.trim())
+    if (!userIdResult.success) {
+      return c.json(createErrorResponse('user_id must be a valid UUID.'), 400)
+    }
+
+    const maidIdResult = uuidStringSchema.safeParse(maidIdRaw.trim())
+    if (!maidIdResult.success) {
+      return c.json(createErrorResponse('maid_id must be a valid UUID.'), 400)
     }
 
     if (!(instaxFile instanceof File) || instaxFile.size === 0) {
       return c.json(createErrorResponse('instax file is required.'), 400)
     }
 
-    const userId = Number.parseInt(userIdRaw, 10)
-    const maidId = Number.parseInt(maidIdRaw, 10)
+    const userId = userIdResult.data
+    const maidId = maidIdResult.data
 
     const db = getDb(c.env)
     const existing = await db.query.instaxes.findFirst({
@@ -548,11 +581,12 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/admin/users/:userId/instax-history', adminApiAuthMiddleware, listUserInstaxHistoryRouteDocs, async (c) => {
     const userIdParam = c.req.param('userId')
 
-    if (!/^[1-9]\d*$/.test(userIdParam)) {
+    const userIdResult = uuidStringSchema.safeParse(userIdParam)
+    if (!userIdResult.success) {
       return c.json(createErrorResponse('Invalid user id.'), 400)
     }
 
-    const userId = Number.parseInt(userIdParam, 10)
+    const userId = userIdResult.data
     const db = getDb(c.env)
 
     const rows = await db
