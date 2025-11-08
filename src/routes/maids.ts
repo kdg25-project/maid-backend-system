@@ -1,6 +1,6 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver, validator } from 'hono-openapi'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type { OpenAPIV3 } from 'openapi-types'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
@@ -523,7 +523,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
 
     const db = getDb(c.env)
     const maid = await db.query.maids.findFirst({
-      where: (fields, { eq, and }) => and(eq(fields.id, id), eq(fields.isActive, true)),
+      where: (fields, { eq }) => eq(fields.id, id),
     })
 
     if (!maid) {
