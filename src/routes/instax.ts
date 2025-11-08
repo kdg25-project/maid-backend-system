@@ -12,6 +12,7 @@ import { adminApiAuthMiddleware } from '../middlewares/adminApiAuth'
 import type { OpenAPIV3 } from 'openapi-types'
 
 type InstaxRow = typeof instaxes.$inferSelect
+type Database = ReturnType<typeof getDb>
 const uuidStringSchema = z.string().uuid()
 const instaxSchema = z
   .object({
@@ -130,6 +131,29 @@ const mapInstaxHistory = (
   archived_at: row.archivedAt,
 })
 
+const createInstaxRecord = async (
+  env: AppEnv['Bindings'],
+  db: Database,
+  params: { userId: string; maidId: string; file: File },
+) => {
+  const { key } = await uploadR2Object(env, `instax/${params.userId}`, params.file)
+
+  const [inserted] = await db
+    .insert(instaxes)
+    .values({
+      userId: params.userId,
+      maidId: params.maidId,
+      imageUrl: key,
+    })
+    .returning()
+
+  if (!inserted) {
+    throw new Error('Failed to create instax record.')
+  }
+
+  return inserted
+}
+
 const getInstaxRouteDocs = describeRoute({
   tags: ['Instax'],
   summary: 'Fetch instax by id',
@@ -235,6 +259,85 @@ const createInstaxRouteDocs = describeRoute({
     },
     400: {
       description: 'Invalid form-data payload.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
+const createInstaxBySeatRouteDocs = describeRoute({
+  tags: ['Instax'],
+  summary: 'Create an instax by seat',
+  description:
+    'Upload a new instax image while resolving the user by seat identifier. The most recently updated valid user assigned to the seat is used.',
+  requestBody: {
+    required: true,
+    content: {
+      'multipart/form-data': {
+        schema: {
+          type: 'object',
+          properties: {
+            seat_id: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Seat identifier used to resolve the user.',
+              example: 12,
+            },
+            maid_id: {
+              type: 'string',
+              format: 'uuid',
+              description: 'Maid identifier.',
+              example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+            },
+            instax: {
+              type: 'string',
+              format: 'binary',
+              description: 'Instax image file.',
+              example: 'instax-seat-sample.jpg',
+            },
+          },
+          required: ['seat_id', 'maid_id', 'instax'],
+        },
+        examples: {
+          default: {
+            summary: 'Upload instax using seat reference',
+            value: {
+              seat_id: 12,
+              maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+              instax: 'instax-seat-sample.jpg',
+            },
+          },
+        },
+        encoding: {
+          instax: {
+            contentType: 'image/jpeg',
+          },
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Instax created successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(instaxResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid form-data payload.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Seat has no active user.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -486,17 +589,81 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
     const userId = userIdResult.data
     const maidId = maidIdResult.data
 
-    const { key } = await uploadR2Object(c.env, `instax/${userId}`, instaxFile)
-
     const db = getDb(c.env)
-    const [inserted] = await db
-      .insert(instaxes)
-      .values({
-        userId,
-        maidId,
-        imageUrl: key,
-      })
-      .returning()
+    const inserted = await createInstaxRecord(c.env, db, {
+      userId,
+      maidId,
+      file: instaxFile,
+    })
+
+    return c.json(
+      createSuccessResponse(mapInstax(c.env, inserted), 'Instax created successfully.'),
+      201,
+    )
+  })
+
+  app.post('/api/instax/by-seat', createInstaxBySeatRouteDocs, async (c) => {
+    const contentType = c.req.header('content-type') ?? ''
+
+    if (!contentType.includes('multipart/form-data')) {
+      return c.json(
+        createErrorResponse('Content-Type must be multipart/form-data.'),
+        400,
+      )
+    }
+
+    const formData = await c.req.parseBody()
+    const seatIdRaw = formData['seat_id']
+    const maidIdRaw = formData['maid_id']
+    const instaxFile = formData['instax']
+
+    if (typeof seatIdRaw !== 'string') {
+      return c.json(createErrorResponse('seat_id must be provided.'), 400)
+    }
+
+    if (typeof maidIdRaw !== 'string') {
+      return c.json(createErrorResponse('maid_id must be provided.'), 400)
+    }
+
+    const seatIdValue = Number.parseInt(seatIdRaw.trim(), 10)
+    if (!Number.isFinite(seatIdValue) || seatIdValue < 1) {
+      return c.json(
+        createErrorResponse('seat_id must be a positive integer value.'),
+        400,
+      )
+    }
+
+    const maidIdResult = uuidStringSchema.safeParse(maidIdRaw.trim())
+    if (!maidIdResult.success) {
+      return c.json(createErrorResponse('maid_id must be a valid UUID.'), 400)
+    }
+
+    if (!(instaxFile instanceof File) || instaxFile.size === 0) {
+      return c.json(createErrorResponse('instax file is required.'), 400)
+    }
+
+    const seatId = seatIdValue
+    const maidId = maidIdResult.data
+    const db = getDb(c.env)
+
+    const latestUser = await db.query.users.findFirst({
+      where: (fields, { eq, and }) =>
+        and(eq(fields.seatId, seatId), eq(fields.isValid, true)),
+      orderBy: (fields, { desc }) => desc(fields.updatedAt),
+    })
+
+    if (!latestUser) {
+      return c.json(
+        createErrorResponse('No active user found for the provided seat.'),
+        404,
+      )
+    }
+
+    const inserted = await createInstaxRecord(c.env, db, {
+      userId: latestUser.id,
+      maidId,
+      file: instaxFile,
+    })
 
     return c.json(
       createSuccessResponse(mapInstax(c.env, inserted), 'Instax created successfully.'),
