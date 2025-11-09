@@ -36,7 +36,7 @@ const statusInputSchema = z
     message: 'status must not be empty when provided.',
   })
 
-const userSchema = z
+export const userSchema = z
   .object({
     id: z
       .string()
@@ -495,7 +495,7 @@ const updateUserRouteDocs = describeRoute({
   },
 })
 
-const mapUser = (user: UserRow) => ({
+export const mapUser = (user: UserRow) => ({
   id: user.id,
   name: normalizeNullableString(user.name),
   status: normalizeNullableString(user.status),

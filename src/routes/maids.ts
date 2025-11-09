@@ -7,9 +7,10 @@ import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
 import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
-import { maids } from '../../drizzle/schema'
+import { maids, users } from '../../drizzle/schema'
 import { buildR2PublicUrl, deleteR2Object, uploadR2Object } from '../libs/storage'
 import { maidApiAuthMiddleware } from '../middlewares/maidApiAuth'
+import { mapUser, userSchema } from './users'
 
 const maidSchema = z
   .object({
@@ -51,8 +52,54 @@ const maidsListSchema = z.array(maidSchema).openapi({
 })
 const maidsListResponseSchema = successResponseSchema(maidsListSchema)
 
+const maidEngagementStateSchema = z
+  .enum(['serving', 'leaving'])
+  .openapi({
+    description: 'Derived engagement state. `leaving` when the user status equals "leaving" (case-insensitive), otherwise `serving`.',
+    example: 'serving',
+  })
+
+const maidEngagementFilterSchema = z
+  .enum(['serving', 'leaving', 'both'])
+  .openapi({
+    description: 'Query filter for engagement state. `both` returns every assigned user while still tagging each row.',
+    example: 'both',
+  })
+
+const maidAssignedUserSchema = userSchema
+  .extend({
+    engagement_state: maidEngagementStateSchema,
+  })
+  .openapi({
+    description: 'User assigned to a maid together with the derived engagement state.',
+  })
+
+const maidAssignedUsersResponseSchema = successResponseSchema(
+  z
+    .object({
+      maid_id: z
+        .string()
+        .uuid()
+        .openapi({
+          example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+          description: 'Target maid identifier.',
+        }),
+      status_filter: maidEngagementFilterSchema,
+      users: z
+        .array(maidAssignedUserSchema)
+        .openapi({
+          description: 'Users assigned to the maid that satisfy the filter.',
+        }),
+    })
+    .openapi({
+      description: 'Assigned users grouped by engagement state.',
+    }),
+)
+
 type Bindings = AppEnv['Bindings']
 type MaidRow = typeof maids.$inferSelect
+type MaidAssignedUserRow = typeof users.$inferSelect
+type MaidEngagementState = z.infer<typeof maidEngagementStateSchema>
 
 const maidIdParamSchema = z.string().uuid()
 
@@ -62,6 +109,19 @@ const mapMaid = (env: Bindings, maid: MaidRow) => ({
   image_url: maid.imageUrl ? buildR2PublicUrl(env, maid.imageUrl) : null,
   is_instax_available: Boolean(maid.isInstaxAvailable),
   is_active: Boolean(maid.isActive),
+})
+
+const deriveEngagementState = (status: string | null | undefined): MaidEngagementState => {
+  if (!status) {
+    return 'serving'
+  }
+
+  return status.trim().toLowerCase() === 'leaving' ? 'leaving' : 'serving'
+}
+
+const mapMaidAssignedUser = (user: MaidAssignedUserRow) => ({
+  ...mapUser(user),
+  engagement_state: deriveEngagementState(user.status ?? null),
 })
 
 const createMaidBodySchema = z
@@ -230,6 +290,72 @@ const createMaidRouteDocs = describeRoute({
     },
     409: {
       description: 'Maid identifier already exists.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
+const listMaidAssignedUsersRouteDocs = describeRoute({
+  tags: ['Maids'],
+  summary: 'List assigned users for a maid',
+  description:
+    'Returns the users currently assigned to the specified maid. A user is treated as `leaving` when their status is "leaving" (case-insensitive); any other status is treated as `serving`.',
+  security: [maidApiSecurityRequirement],
+  parameters: [
+    {
+      name: 'id',
+      in: 'path',
+      required: true,
+      description: 'Maid identifier.',
+      schema: {
+        type: 'string',
+        format: 'uuid',
+      },
+    },
+    {
+      name: 'status',
+      in: 'query',
+      required: false,
+      description:
+        'Filter assigned users by engagement state. Accepts `serving`, `leaving`, or `both` (default).',
+      schema: {
+        type: 'string',
+        enum: ['serving', 'leaving', 'both'],
+        default: 'both',
+      },
+    },
+  ],
+  responses: {
+    200: {
+      description: 'Assigned users retrieved successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(maidAssignedUsersResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid identifier or status filter supplied.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Maid not found.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -548,6 +674,56 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     }
 
     return c.json(createSuccessResponse(mapMaid(c.env, maid)))
+  })
+
+  app.get('/api/maids/:id/users', maidApiAuthMiddleware, listMaidAssignedUsersRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+    const idResult = maidIdParamSchema.safeParse(idParam)
+
+    if (!idResult.success) {
+      return c.json(createErrorResponse('Invalid maid id.'), 400)
+    }
+
+    const rawStatusQuery = c.req.query('status')
+    const normalizedStatusQuery = rawStatusQuery ? rawStatusQuery.trim().toLowerCase() : ''
+    const statusInput = normalizedStatusQuery.length > 0 ? normalizedStatusQuery : 'both'
+    const statusResult = maidEngagementFilterSchema.safeParse(statusInput)
+
+    if (!statusResult.success) {
+      return c.json(
+        createErrorResponse('Invalid status filter. Use serving, leaving, or both.'),
+        400,
+      )
+    }
+
+    const maidId = idResult.data
+    const statusFilter = statusResult.data
+    const db = getDb(c.env)
+
+    const maid = await db.query.maids.findFirst({
+      where: (fields, { eq }) => eq(fields.id, maidId),
+    })
+
+    if (!maid) {
+      return c.json(createErrorResponse('Maid not found.'), 404)
+    }
+
+    const assignedUsers = await db.query.users.findMany({
+      where: (fields, { eq, and }) => and(eq(fields.maidId, maidId), eq(fields.isValid, true)),
+      orderBy: (fields, { desc }) => desc(fields.updatedAt),
+    })
+
+    const usersByFilter = assignedUsers
+      .map((user) => mapMaidAssignedUser(user))
+      .filter((user) => statusFilter === 'both' || user.engagement_state === statusFilter)
+
+    return c.json(
+      createSuccessResponse({
+        maid_id: maidId,
+        status_filter: statusFilter,
+        users: usersByFilter,
+      }),
+    )
   })
 
   app.post('/api/maids/:id', maidApiAuthMiddleware, createMaidRouteDocs, async (c) => {
