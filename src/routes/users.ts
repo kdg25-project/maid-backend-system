@@ -541,19 +541,6 @@ export const mapUser = (user: UserRow) => ({
 })
 
 export const registerUserRoutes = (app: Hono<AppEnv>) => {
-  app.get('/api/users', maidApiAuthMiddleware, listUsersRouteDocs, async (c) => {
-    const db = getDb(c.env)
-    const userList = await db.query.users.findMany({
-      orderBy: (fields, { desc }) => desc(fields.updatedAt),
-    })
-
-    return c.json(
-      createSuccessResponse({
-        users: userList.map((user) => mapUser(user)),
-      }),
-    )
-  })
-
   app.get('/api/users/seat/:seatId', maidApiAuthMiddleware, getUserBySeatRouteDocs, async (c) => {
     const seatParam = c.req.param('seatId')
 
@@ -597,6 +584,19 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
     }
 
     return c.json(createSuccessResponse(mapUser(user)))
+  })
+
+  app.get('/api/users', maidApiAuthMiddleware, listUsersRouteDocs, async (c) => {
+    const db = getDb(c.env)
+    const userList = await db.query.users.findMany({
+      orderBy: (fields, { desc }) => desc(fields.updatedAt),
+    })
+
+    return c.json(
+      createSuccessResponse({
+        users: userList.map((user) => mapUser(user)),
+      }),
+    )
   })
 
   app.post('/api/users/:id', createUserRouteDocs, async (c) => {
