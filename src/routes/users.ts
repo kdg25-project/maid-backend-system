@@ -358,6 +358,39 @@ const maidApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
   MaidApiKey: [],
 }
 
+const listUsersRouteDocs = describeRoute({
+  tags: ['Users'],
+  summary: 'List all users',
+  description: 'Retrieve all user records in the system.',
+  security: [maidApiSecurityRequirement],
+  responses: {
+    200: {
+      description: 'Users retrieved successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(
+            successResponseSchema(
+              z.object({
+                users: z.array(userSchema).openapi({
+                  description: 'List of all users.',
+                }),
+              })
+            )
+          ),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 const getUserBySeatRouteDocs = describeRoute({
   tags: ['Users'],
   summary: 'Fetch user by seat',
@@ -508,6 +541,19 @@ export const mapUser = (user: UserRow) => ({
 })
 
 export const registerUserRoutes = (app: Hono<AppEnv>) => {
+  app.get('/api/users', maidApiAuthMiddleware, listUsersRouteDocs, async (c) => {
+    const db = getDb(c.env)
+    const userList = await db.query.users.findMany({
+      orderBy: (fields, { desc }) => desc(fields.updatedAt),
+    })
+
+    return c.json(
+      createSuccessResponse({
+        users: userList.map((user) => mapUser(user)),
+      }),
+    )
+  })
+
   app.get('/api/users/seat/:seatId', maidApiAuthMiddleware, getUserBySeatRouteDocs, async (c) => {
     const seatParam = c.req.param('seatId')
 
