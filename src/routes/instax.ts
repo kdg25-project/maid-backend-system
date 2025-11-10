@@ -207,6 +207,50 @@ const getInstaxRouteDocs = describeRoute({
   },
 })
 
+const getInstaxByUserRouteDocs = describeRoute({
+  tags: ['Instax'],
+  summary: 'Fetch instax by user id',
+  description: 'Retrieve the instax record associated with a specific user.',
+  parameters: [
+    {
+      name: 'userId',
+      in: 'path',
+      required: true,
+      description: 'User identifier.',
+      schema: {
+        type: 'string',
+        format: 'uuid',
+      },
+    },
+  ],
+  responses: {
+    200: {
+      description: 'Instax retrieved successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(instaxResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid user identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Instax not found for the specified user.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
 const createInstaxRouteDocs = describeRoute({
   tags: ['Instax'],
   summary: 'Create an instax',
@@ -552,6 +596,29 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
 
     if (!instaxRecord) {
       return c.json(createErrorResponse('Instax not found.'), 404)
+    }
+
+    return c.json(createSuccessResponse(mapInstax(c.env, instaxRecord)))
+  })
+
+  app.get('/api/instax/user/:userId', getInstaxByUserRouteDocs, async (c) => {
+    const userIdParam = c.req.param('userId')
+
+    const userIdResult = uuidStringSchema.safeParse(userIdParam)
+    if (!userIdResult.success) {
+      return c.json(createErrorResponse('Invalid user id.'), 400)
+    }
+
+    const userId = userIdResult.data
+    const db = getDb(c.env)
+
+    const instaxRecord = await db.query.instaxes.findFirst({
+      where: (fields, { eq }) => eq(fields.userId, userId),
+      orderBy: (fields, { desc }) => desc(fields.createdAt),
+    })
+
+    if (!instaxRecord) {
+      return c.json(createErrorResponse('Instax not found for the specified user.'), 404)
     }
 
     return c.json(createSuccessResponse(mapInstax(c.env, instaxRecord)))
