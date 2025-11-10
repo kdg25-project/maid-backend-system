@@ -179,6 +179,7 @@ const getInstaxRouteDocs = describeRoute({
       },
     },
   ],
+  security: [maidApiSecurityRequirement],
   responses: {
     200: {
       description: 'Instax retrieved successfully.',
@@ -196,8 +197,60 @@ const getInstaxRouteDocs = describeRoute({
         },
       },
     },
+    401: {
+      description: 'Unauthorized.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
     404: {
       description: 'Instax not found.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+  },
+})
+
+const getInstaxByUserRouteDocs = describeRoute({
+  tags: ['Instax'],
+  summary: 'Fetch instax by user id',
+  description: 'Retrieve the most recent instax record for the specified user.',
+  parameters: [
+    {
+      name: 'userId',
+      in: 'path',
+      required: true,
+      description: 'User identifier.',
+      schema: {
+        type: 'string',
+        format: 'uuid',
+      },
+    },
+  ],
+  responses: {
+    200: {
+      description: 'Instax retrieved successfully.',
+      content: {
+        'application/json': {
+          schema: resolver(instaxResponseSchema),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid user identifier.',
+      content: {
+        'application/json': {
+          schema: resolver(errorResponseSchema),
+        },
+      },
+    },
+    404: {
+      description: 'Instax not found for the specified user.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -537,7 +590,7 @@ const deleteInstaxHistoryRouteDocs = describeRoute({
 })
 
 export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
-  app.get('/api/instax/:id', getInstaxRouteDocs, async (c) => {
+  app.get('/api/instax/:id', maidApiAuthMiddleware, getInstaxRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
     if (!/^[1-9]\d*$/.test(idParam)) {
@@ -548,6 +601,28 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
     const db = getDb(c.env)
     const instaxRecord = await db.query.instaxes.findFirst({
       where: (fields, { eq }) => eq(fields.id, id),
+    })
+
+    if (!instaxRecord) {
+      return c.json(createErrorResponse('Instax not found.'), 404)
+    }
+
+    return c.json(createSuccessResponse(mapInstax(c.env, instaxRecord)))
+  })
+
+  app.get('/api/users/:userId/instax', getInstaxByUserRouteDocs, async (c) => {
+    const userIdParam = c.req.param('userId')
+
+    const userIdResult = uuidStringSchema.safeParse(userIdParam)
+    if (!userIdResult.success) {
+      return c.json(createErrorResponse('Invalid user id.'), 400)
+    }
+
+    const userId = userIdResult.data
+    const db = getDb(c.env)
+    const instaxRecord = await db.query.instaxes.findFirst({
+      where: (fields, { eq }) => eq(fields.userId, userId),
+      orderBy: (fields, { desc }) => desc(fields.createdAt),
     })
 
     if (!instaxRecord) {

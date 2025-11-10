@@ -79,6 +79,15 @@ export const userSchema = z
         description: 'Instax maid identifier if assigned.',
         nullable: true,
       }),
+    instax_id: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({
+        example: 42,
+        description: 'instax identifier associated with the user.',
+        nullable: true,
+      }),
     seat_id: z
       .number()
       .int()
@@ -495,17 +504,32 @@ const updateUserRouteDocs = describeRoute({
   },
 })
 
-export const mapUser = (user: UserRow) => ({
+export const mapUser = (user: UserRow, options?: { instaxId?: number | null }) => ({
   id: user.id,
   name: normalizeNullableString(user.name),
   status: normalizeNullableString(user.status),
   maid_id: user.maidId ?? null,
   instax_maid_id: user.instaxMaidId ?? null,
+  instax_id: options?.instaxId ?? null,
   seat_id: user.seatId ?? null,
   is_valid: Boolean(user.isValid),
   created_at: user.createdAt,
   updated_at: user.updatedAt,
 })
+
+const fetchLatestInstaxIdForUser = async (db: Database, userId: string) => {
+  const instaxRecord = await db.query.instaxes.findFirst({
+    where: (fields, { eq: equals }) => equals(fields.userId, userId),
+    orderBy: (fields, { desc }) => desc(fields.createdAt),
+  })
+
+  return instaxRecord?.id ?? null
+}
+
+const mapUserWithLatestInstax = async (db: Database, user: UserRow) => {
+  const instaxId = await fetchLatestInstaxIdForUser(db, user.id)
+  return mapUser(user, { instaxId })
+}
 
 export const registerUserRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/users/seat/:seatId', maidApiAuthMiddleware, getUserBySeatRouteDocs, async (c) => {
@@ -529,7 +553,8 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
       return c.json(createErrorResponse('No active user found for the specified seat.'), 404)
     }
 
-    return c.json(createSuccessResponse(mapUser(user)))
+    const payload = await mapUserWithLatestInstax(db, user)
+    return c.json(createSuccessResponse(payload))
   })
 
   app.get('/api/users/:id', getUserRouteDocs, async (c) => {
@@ -550,7 +575,8 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
       return c.json(createErrorResponse('User not found.'), 404)
     }
 
-    return c.json(createSuccessResponse(mapUser(user)))
+    const payload = await mapUserWithLatestInstax(db, user)
+    return c.json(createSuccessResponse(payload))
   })
 
   app.post('/api/users/:id', createUserRouteDocs, async (c) => {
@@ -614,8 +640,9 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
         ...updatePayload,
       }
 
+      const payload = await mapUserWithLatestInstax(db, result)
       return c.json(
-        createSuccessResponse(mapUser(result), 'User registered successfully.'),
+        createSuccessResponse(payload, 'User registered successfully.'),
       )
     }
 
@@ -637,8 +664,13 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
       .values(insertValues)
       .returning()
 
+    if (!inserted) {
+      return c.json(createErrorResponse('Failed to register user.'), 500)
+    }
+
+    const payload = await mapUserWithLatestInstax(db, inserted)
     return c.json(
-      createSuccessResponse(mapUser(inserted), 'User registered successfully.'),
+      createSuccessResponse(payload, 'User registered successfully.'),
     )
   })
 
@@ -720,8 +752,9 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
     }
 
     if (Object.keys(updateValues).length === 0) {
+      const payload = await mapUserWithLatestInstax(db, existing)
       return c.json(
-        createSuccessResponse(mapUser(existing), 'No changes applied.'),
+        createSuccessResponse(payload, 'No changes applied.'),
       )
     }
 
@@ -737,8 +770,9 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
 
     const result = updated ?? { ...existing, ...updateValues }
 
+    const payload = await mapUserWithLatestInstax(db, result)
     return c.json(
-      createSuccessResponse(mapUser(result), 'User updated successfully.'),
+      createSuccessResponse(payload, 'User updated successfully.'),
     )
   })
 }

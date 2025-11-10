@@ -1,13 +1,13 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver, validator } from 'hono-openapi'
-import { eq } from 'drizzle-orm'
+import { desc, eq, inArray } from 'drizzle-orm'
 import type { OpenAPIV3 } from 'openapi-types'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
 import { createErrorResponse, createSuccessResponse } from '../libs/responses'
 import { errorResponseSchema, successResponseSchema } from '../libs/openapi'
-import { maids, users } from '../../drizzle/schema'
+import { instaxes, maids, users } from '../../drizzle/schema'
 import { buildR2PublicUrl, deleteR2Object, uploadR2Object } from '../libs/storage'
 import { maidApiAuthMiddleware } from '../middlewares/maidApiAuth'
 import { mapUser, userSchema } from './users'
@@ -97,6 +97,7 @@ const maidAssignedUsersResponseSchema = successResponseSchema(
 )
 
 type Bindings = AppEnv['Bindings']
+type Database = ReturnType<typeof getDb>
 type MaidRow = typeof maids.$inferSelect
 type MaidAssignedUserRow = typeof users.$inferSelect
 type MaidEngagementState = z.infer<typeof maidEngagementStateSchema>
@@ -119,10 +120,36 @@ const deriveEngagementState = (status: string | null | undefined): MaidEngagemen
   return status.trim().toLowerCase() === 'leaving' ? 'leaving' : 'serving'
 }
 
-const mapMaidAssignedUser = (user: MaidAssignedUserRow) => ({
-  ...mapUser(user),
+const mapMaidAssignedUser = (user: MaidAssignedUserRow, instaxId: number | null) => ({
+  ...mapUser(user, { instaxId }),
   engagement_state: deriveEngagementState(user.status ?? null),
 })
+
+const fetchLatestInstaxIdsForUsers = async (db: Database, userIds: string[]) => {
+  if (userIds.length === 0) {
+    return {}
+  }
+
+  const rows = await db
+    .select({
+      id: instaxes.id,
+      userId: instaxes.userId,
+      createdAt: instaxes.createdAt,
+    })
+    .from(instaxes)
+    .where(inArray(instaxes.userId, userIds))
+    .orderBy(desc(instaxes.createdAt))
+    .all()
+
+  const map: Record<string, number> = {}
+  for (const row of rows) {
+    if (map[row.userId] === undefined) {
+      map[row.userId] = row.id
+    }
+  }
+
+  return map
+}
 
 const createMaidBodySchema = z
   .object({
@@ -713,8 +740,11 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
       orderBy: (fields, { desc }) => desc(fields.updatedAt),
     })
 
+    const userIds = assignedUsers.map((user) => user.id)
+    const latestInstaxMap = await fetchLatestInstaxIdsForUsers(db, userIds)
+
     const usersByFilter = assignedUsers
-      .map((user) => mapMaidAssignedUser(user))
+      .map((user) => mapMaidAssignedUser(user, latestInstaxMap[user.id] ?? null))
       .filter((user) => statusFilter === 'both' || user.engagement_state === statusFilter)
 
     return c.json(
