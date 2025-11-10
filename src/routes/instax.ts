@@ -581,26 +581,6 @@ const deleteInstaxHistoryRouteDocs = describeRoute({
 })
 
 export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
-  app.get('/api/instax/:id', getInstaxRouteDocs, async (c) => {
-    const idParam = c.req.param('id')
-
-    if (!/^[1-9]\d*$/.test(idParam)) {
-      return c.json(createErrorResponse('Invalid instax id.'), 400)
-    }
-
-    const id = Number.parseInt(idParam, 10)
-    const db = getDb(c.env)
-    const instaxRecord = await db.query.instaxes.findFirst({
-      where: (fields, { eq }) => eq(fields.id, id),
-    })
-
-    if (!instaxRecord) {
-      return c.json(createErrorResponse('Instax not found.'), 404)
-    }
-
-    return c.json(createSuccessResponse(mapInstax(c.env, instaxRecord)))
-  })
-
   app.get('/api/instax/user/:userId', getInstaxByUserRouteDocs, async (c) => {
     const userIdParam = c.req.param('userId')
 
@@ -619,6 +599,26 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
 
     if (!instaxRecord) {
       return c.json(createErrorResponse('Instax not found for the specified user.'), 404)
+    }
+
+    return c.json(createSuccessResponse(mapInstax(c.env, instaxRecord)))
+  })
+
+  app.get('/api/instax/:id', getInstaxRouteDocs, async (c) => {
+    const idParam = c.req.param('id')
+
+    if (!/^[1-9]\d*$/.test(idParam)) {
+      return c.json(createErrorResponse('Invalid instax id.'), 400)
+    }
+
+    const id = Number.parseInt(idParam, 10)
+    const db = getDb(c.env)
+    const instaxRecord = await db.query.instaxes.findFirst({
+      where: (fields, { eq }) => eq(fields.id, id),
+    })
+
+    if (!instaxRecord) {
+      return c.json(createErrorResponse('Instax not found.'), 404)
     }
 
     return c.json(createSuccessResponse(mapInstax(c.env, instaxRecord)))
