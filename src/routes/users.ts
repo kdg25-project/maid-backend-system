@@ -29,11 +29,25 @@ const sanitizeStatus = (value: string | null | undefined) => {
   return trimmed.length > 0 ? trimmed : null
 }
 
+const sanitizeHonorific = (value: string | null | undefined) => {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 const statusInputSchema = z
   .string()
   .max(200, { message: 'status must be at most 200 characters.' })
   .refine((val) => val.trim().length > 0, {
     message: 'status must not be empty when provided.',
+  })
+
+const honorificInputSchema = z
+  .string()
+  .max(50, { message: 'honorific must be at most 50 characters.' })
+  .refine((val) => val.trim().length > 0, {
+    message: 'honorific must not be empty when provided.',
   })
 
 export const userSchema = z
@@ -51,6 +65,14 @@ export const userSchema = z
       .openapi({
         example: null,
         description: 'User name if registered.',
+        nullable: true,
+      }),
+    honorific: z
+      .string()
+      .nullable()
+      .openapi({
+        example: 'ご主人様',
+        description: 'Preferred honorific for addressing the user.',
         nullable: true,
       }),
     status: z
@@ -163,7 +185,8 @@ const createUserBodySchema = z
       .optional()
       .openapi({
         example: 'Waiting at entrance.',
-        description: 'Optional current status text to store for the user.',
+        description: 'Optional current status text to store for the user. Defaults to "welcome" when omitted.',
+        default: 'welcome',
       }),
   })
   .openapi({
@@ -179,6 +202,14 @@ const updateUserBodySchema = z
       .openapi({
         example: 'John Doe',
         description: 'Updated user name.',
+      }),
+    honorific: honorificInputSchema
+      .nullable()
+      .optional()
+      .openapi({
+        example: 'ご主人様',
+        description: 'Updated honorific title (null clears the value).',
+        nullable: true,
       }),
     maid_id: z
       .string()
@@ -230,6 +261,7 @@ const updateUserBodySchema = z
   .refine(
     (payload) =>
       payload.name !== undefined ||
+      payload.honorific !== undefined ||
       payload.maid_id !== undefined ||
       payload.instax_maid_id !== undefined ||
       payload.seat_id !== undefined ||
@@ -507,6 +539,7 @@ const updateUserRouteDocs = describeRoute({
 export const mapUser = (user: UserRow, options?: { instaxId?: number | null }) => ({
   id: user.id,
   name: normalizeNullableString(user.name),
+  honorific: normalizeNullableString(user.honorific),
   status: normalizeNullableString(user.status),
   maid_id: user.maidId ?? null,
   instax_maid_id: user.instaxMaidId ?? null,
@@ -653,6 +686,7 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
       instaxMaidId: null,
       isValid: true,
       name: '',
+      status: 'welcome',
     }
 
     if (sanitizedStatus !== undefined) {
@@ -723,6 +757,12 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
     if (parsed.data.name !== undefined) {
       updateValues.name = parsed.data.name.trim()
       existing.name = updateValues.name
+    }
+
+    if (parsed.data.honorific !== undefined) {
+      const sanitizedHonorific = sanitizeHonorific(parsed.data.honorific)
+      updateValues.honorific = sanitizedHonorific ?? null
+      existing.honorific = sanitizedHonorific ?? null
     }
 
     if (parsed.data.maid_id !== undefined) {

@@ -120,10 +120,14 @@ const deriveEngagementState = (status: string | null | undefined): MaidEngagemen
   return status.trim().toLowerCase() === 'leaving' ? 'leaving' : 'serving'
 }
 
-const mapMaidAssignedUser = (user: MaidAssignedUserRow, instaxId: number | null) => ({
-  ...mapUser(user, { instaxId }),
-  engagement_state: deriveEngagementState(user.status ?? null),
-})
+const mapMaidAssignedUser = (user: MaidAssignedUserRow, instaxId: number | null) => {
+  const mapped = mapUser(user, { instaxId })
+  return {
+    ...mapped,
+    honorific: mapped.honorific ?? null,
+    engagement_state: deriveEngagementState(user.status ?? null),
+  }
+}
 
 const fetchLatestInstaxIdsForUsers = async (db: Database, userIds: string[]) => {
   if (userIds.length === 0) {
@@ -362,6 +366,35 @@ const listMaidAssignedUsersRouteDocs = describeRoute({
       content: {
         'application/json': {
           schema: resolver(maidAssignedUsersResponseSchema),
+          examples: {
+            default: {
+              summary: 'Assigned users including honorific',
+              value: {
+                success: true,
+                message: 'Assigned users retrieved successfully.',
+                data: {
+                  maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+                  status_filter: 'both',
+                  users: [
+                    {
+                      id: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
+                      name: 'John Doe',
+                      honorific: 'ご主人様',
+                      status: 'Enjoying parfait.',
+                      maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+                      instax_maid_id: null,
+                      instax_id: 42,
+                      seat_id: 7,
+                      is_valid: true,
+                      created_at: '2025-01-15T10:00:00.000Z',
+                      updated_at: '2025-01-15T12:00:00.000Z',
+                      engagement_state: 'serving',
+                    },
+                  ],
+                },
+              },
+            },
+          },
         },
       },
     },

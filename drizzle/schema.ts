@@ -25,6 +25,7 @@ export const users = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
+    honorific: text("honorific"),
     status: text("status"),
     maidId: text("maid_id")
       .references(() => maids.id, { onDelete: "set null" }),
