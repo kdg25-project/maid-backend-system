@@ -414,8 +414,7 @@ const createInstaxBySeatRouteDocs = describeRoute({
 const updateInstaxRouteDocs = describeRoute({
   tags: ['Instax'],
   summary: 'Update an instax',
-  description:
-    'Replace the image for an existing instax entry identified by user and maid identifiers.',
+  description: 'Replace the image for an existing instax entry identified by instax id.',
   requestBody: {
     required: true,
     content: {
@@ -423,17 +422,11 @@ const updateInstaxRouteDocs = describeRoute({
         schema: {
           type: 'object',
           properties: {
-            user_id: {
-              type: 'string',
-              format: 'uuid',
-              description: 'User identifier.',
-              example: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
-            },
-            maid_id: {
-              type: 'string',
-              format: 'uuid',
-              description: 'Maid identifier.',
-              example: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+            instax_id: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Instax identifier.',
+              example: 42,
             },
             instax: {
               type: 'string',
@@ -442,14 +435,13 @@ const updateInstaxRouteDocs = describeRoute({
               example: 'instax-replacement.jpg',
             },
           },
-          required: ['user_id', 'maid_id', 'instax'],
+          required: ['instax_id', 'instax'],
         },
         examples: {
           default: {
             summary: 'Replace instax image',
             value: {
-              user_id: 'f1d2e3c4-b5a6-47d8-9123-abcdefabcdef',
-              maid_id: 'c2608c61-4a4a-405a-8024-1cc403a53c1d',
+              instax_id: 42,
               instax: 'instax-replacement.jpg',
             },
           },
@@ -481,7 +473,7 @@ const updateInstaxRouteDocs = describeRoute({
       },
     },
     404: {
-      description: 'Instax not found for the provided identifiers.',
+      description: 'Instax not found for the provided instax id.',
       content: {
         'application/json': {
           schema: resolver(errorResponseSchema),
@@ -765,40 +757,29 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
     }
 
     const formData = await c.req.parseBody()
-    const userIdRaw = formData['user_id']
-    const maidIdRaw = formData['maid_id']
+    const instaxIdRaw = formData['instax_id']
     const instaxFile = formData['instax']
 
-    if (typeof userIdRaw !== 'string') {
-      return c.json(createErrorResponse('user_id must be provided.'), 400)
+    if (typeof instaxIdRaw !== 'string') {
+      return c.json(createErrorResponse('instax_id must be provided.'), 400)
     }
 
-    if (typeof maidIdRaw !== 'string') {
-      return c.json(createErrorResponse('maid_id must be provided.'), 400)
-    }
-
-    const userIdResult = uuidStringSchema.safeParse(userIdRaw.trim())
-    if (!userIdResult.success) {
-      return c.json(createErrorResponse('user_id must be a valid UUID.'), 400)
-    }
-
-    const maidIdResult = uuidStringSchema.safeParse(maidIdRaw.trim())
-    if (!maidIdResult.success) {
-      return c.json(createErrorResponse('maid_id must be a valid UUID.'), 400)
+    const instaxIdValue = Number.parseInt(instaxIdRaw.trim(), 10)
+    if (!Number.isFinite(instaxIdValue) || instaxIdValue < 1) {
+      return c.json(
+        createErrorResponse('instax_id must be a positive integer value.'),
+        400,
+      )
     }
 
     if (!(instaxFile instanceof File) || instaxFile.size === 0) {
       return c.json(createErrorResponse('instax file is required.'), 400)
     }
 
-    const userId = userIdResult.data
-    const maidId = maidIdResult.data
-
+    const instaxId = instaxIdValue
     const db = getDb(c.env)
     const existing = await db.query.instaxes.findFirst({
-      where: (fields, { eq, and }) =>
-        and(eq(fields.userId, userId), eq(fields.maidId, maidId)),
-      orderBy: (fields, { desc }) => desc(fields.createdAt),
+      where: (fields, { eq }) => eq(fields.id, instaxId),
     })
 
     if (!existing) {
@@ -806,7 +787,7 @@ export const registerInstaxRoutes = (app: Hono<AppEnv>) => {
     }
 
     const previousImageKey = existing.imageUrl
-    const { key } = await uploadR2Object(c.env, `instax/${userId}`, instaxFile)
+    const { key } = await uploadR2Object(c.env, `instax/${existing.userId}`, instaxFile)
 
     if (previousImageKey) {
       await db.insert(instaxHistories).values({

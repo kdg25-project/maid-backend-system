@@ -144,6 +144,10 @@ export const userSchema = z
 
 const userResponseSchema = successResponseSchema(userSchema)
 
+const maidApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
+  MaidApiKey: [],
+}
+
 const validateMaidReference = async (
   db: Database,
   maidId: string | null | undefined,
@@ -280,6 +284,7 @@ const createUserRouteDocs = describeRoute({
   summary: 'Register a user (entry registration)',
   description:
     'Registers a new user placeholder or re-registers an existing user by assigning seat and maid ids while marking the record as valid.',
+  security: [maidApiSecurityRequirement],
   parameters: [
     {
       name: 'id',
@@ -395,10 +400,6 @@ const getUserRouteDocs = describeRoute({
   },
 })
 
-const maidApiSecurityRequirement: OpenAPIV3.SecurityRequirementObject = {
-  MaidApiKey: [],
-}
-
 const getUserBySeatRouteDocs = describeRoute({
   tags: ['Users'],
   summary: 'Fetch user by seat',
@@ -450,6 +451,7 @@ const updateUserRouteDocs = describeRoute({
   summary: 'Update user details',
   description:
     'Updates mutable fields for a user record, allowing partial updates of name, maid assignments, seat, and validity.',
+  security: [maidApiSecurityRequirement],
   parameters: [
     {
       name: 'id',
@@ -612,7 +614,7 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
     return c.json(createSuccessResponse(payload))
   })
 
-  app.post('/api/users/:id', createUserRouteDocs, async (c) => {
+  app.post('/api/users/:id', maidApiAuthMiddleware, createUserRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
     const idResult = userIdParamSchema.safeParse(idParam)
@@ -708,7 +710,7 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
     )
   })
 
-  app.patch('/api/users/:id', updateUserRouteDocs, async (c) => {
+  app.patch('/api/users/:id', maidApiAuthMiddleware, updateUserRouteDocs, async (c) => {
     const idParam = c.req.param('id')
 
     const idResult = userIdParamSchema.safeParse(idParam)
