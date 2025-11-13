@@ -1,6 +1,6 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
-import { eq, gt } from 'drizzle-orm'
+import { eq, gt, sql } from 'drizzle-orm'
 import type { OpenAPIV3 } from 'openapi-types'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
@@ -646,17 +646,20 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
     try {
       const uploadResult = await uploadR2Object(c.env, `menus/${menuId}`, image)
       uploadedKey = uploadResult.key
-      const now = new Date().toISOString()
       const [updated] = await db
         .update(menus)
         .set({
           imageUrl: uploadResult.key,
-          updatedAt: now,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
         })
         .where(eq(menus.id, menuId))
         .returning()
 
-      const result = updated ?? { ...insertedMenu, imageUrl: uploadResult.key, updatedAt: now }
+      const result =
+        updated ??
+        (await db.query.menus.findFirst({
+          where: (fields, { eq: equals }) => equals(fields.id, menuId),
+        })) ?? { ...insertedMenu, imageUrl: uploadResult.key }
 
       return c.json(
         createSuccessResponse(mapMenu(c.env, result), 'Menu created successfully.'),
@@ -851,17 +854,20 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
       )
     }
 
-    const now = new Date().toISOString()
-    updateValues.updatedAt = now
-    existing.updatedAt = now
-
     const [updated] = await db
       .update(menus)
-      .set(updateValues)
+      .set({
+        ...updateValues,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
+      })
       .where(eq(menus.id, id))
       .returning()
 
-    const result = updated ?? { ...existing, ...updateValues }
+    const result =
+      updated ??
+      (await db.query.menus.findFirst({
+        where: (fields, { eq: equals }) => equals(fields.id, id),
+      })) ?? { ...existing, ...updateValues }
 
     return c.json(
       createSuccessResponse(mapMenu(c.env, result), 'Menu updated successfully.'),

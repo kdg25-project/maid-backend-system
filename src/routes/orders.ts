@@ -1,6 +1,6 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver, validator } from 'hono-openapi'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
@@ -375,15 +375,17 @@ export const registerOrderRoutes = (app: Hono<AppEnv>) => {
       )
     }
 
-    const now = new Date().toISOString()
     const [updated] = await db
       .update(orders)
-      .set({ state: parsed.state, updatedAt: now })
+      .set({ state: parsed.state, updatedAt: sql`CURRENT_TIMESTAMP` })
       .where(eq(orders.id, id))
       .returning()
 
     const result =
-      updated ?? { ...existing, state: parsed.state, updatedAt: now }
+      updated ??
+      (await db.query.orders.findFirst({
+        where: (fields, { eq: equals }) => equals(fields.id, id),
+      })) ?? { ...existing, state: parsed.state }
 
     return c.json(
       createSuccessResponse(mapOrder(result), 'Order updated successfully.'),

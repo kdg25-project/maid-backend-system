@@ -1,6 +1,6 @@
 import type { Hono } from 'hono'
 import { describeRoute, resolver } from 'hono-openapi'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { z } from '../libs/zod'
 import type { AppEnv } from '../types/bindings'
 import { getDb } from '../libs/db'
@@ -646,7 +646,6 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
       where: (fields, { eq: equals }) => equals(fields.id, id),
     })
 
-    const now = new Date().toISOString()
     const sanitizedStatus = sanitizeStatus(parsed.data.status)
 
     if (existing) {
@@ -656,7 +655,6 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
         instaxMaidId: null,
         isValid: true,
         name: existing.name ?? '',
-        updatedAt: now,
       }
 
       if (sanitizedStatus !== undefined) {
@@ -666,14 +664,21 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
 
       const [updated] = await db
         .update(users)
-        .set(updatePayload)
+        .set({
+          ...updatePayload,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
         .where(eq(users.id, id))
         .returning()
 
-      const result = updated ?? {
-        ...existing,
-        ...updatePayload,
-      }
+      const result =
+        updated ??
+        (await db.query.users.findFirst({
+          where: (fields, { eq: equals }) => equals(fields.id, id),
+        })) ?? {
+          ...existing,
+          ...updatePayload,
+        }
 
       const payload = await mapUserWithLatestInstax(db, result)
       return c.json(
@@ -800,17 +805,20 @@ export const registerUserRoutes = (app: Hono<AppEnv>) => {
       )
     }
 
-    const now = new Date().toISOString()
-    updateValues.updatedAt = now
-    existing.updatedAt = now
-
     const [updated] = await db
       .update(users)
-      .set(updateValues)
+      .set({
+        ...updateValues,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
+      })
       .where(eq(users.id, id))
       .returning()
 
-    const result = updated ?? { ...existing, ...updateValues }
+    const result =
+      updated ??
+      (await db.query.users.findFirst({
+        where: (fields, { eq: equals }) => equals(fields.id, id),
+      })) ?? { ...existing, ...updateValues }
 
     const payload = await mapUserWithLatestInstax(db, result)
     return c.json(
