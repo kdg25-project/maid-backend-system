@@ -28,6 +28,15 @@ const menuSchema = z
       example: 'Omurice',
       description: 'Menu item name.',
     }),
+    description: z
+      .string()
+      .min(1)
+      .nullable()
+      .openapi({
+        example: 'Fluffy omelette over ketchup rice with demi-glace sauce.',
+        description: 'Detailed description of the menu item.',
+        nullable: true,
+      }),
     stock: z.number().int().openapi({
       example: 10,
       description: 'Remaining stock value.',
@@ -89,10 +98,23 @@ const updateMenuJsonBodySchema = z
         example: 5,
         description: 'Updated stock quantity.',
       }),
+    description: z
+      .string()
+      .optional()
+      .openapi({
+        example: 'Rich demi-glace sauce over fluffy omelette rice.',
+        description: 'Updated menu description. Send an empty string to clear it.',
+      }),
   })
-  .refine((payload) => payload.name !== undefined || payload.stock !== undefined, {
+  .refine(
+    (payload) =>
+      payload.name !== undefined ||
+      payload.stock !== undefined ||
+      payload.description !== undefined,
+    {
     message: 'At least one field must be provided.',
-  })
+  },
+  )
   .openapi({
     description: 'JSON payload for updating a menu item (without image).',
   })
@@ -100,6 +122,7 @@ const updateMenuJsonBodySchema = z
 const mapMenu = (env: Bindings, menu: MenuRow) => ({
   id: menu.id,
   name: menu.name,
+  description: menu.description ?? null,
   stock: menu.stock,
   image_url: menu.imageUrl ? buildR2PublicUrl(env, menu.imageUrl) : null,
   created_at: menu.createdAt,
@@ -164,6 +187,7 @@ const getMenuRouteDocs = describeRoute({
                 data: {
                   id: 1,
                   name: 'Omurice',
+                  description: 'Fluffy omelette with demi-glace sauce.',
                   stock: 10,
                   image_url: 'https://example.com/menus/1.jpg',
                   created_at: '2025-01-15T12:30:00.000Z',
@@ -244,6 +268,7 @@ const deleteMenuRouteDocs = describeRoute({
                 data: {
                   id: 42,
                   name: 'Limited Pancake',
+                  description: 'Stack of fluffy pancakes with maple syrup.',
                   stock: 0,
                   image_url: null,
                   created_at: '2025-01-10T09:00:00.000Z',
@@ -326,6 +351,11 @@ const createMenuRouteDocs = describeRoute({
               type: 'string',
               description: 'Menu display name.',
               example: 'Chocolate Parfait',
+            },
+            description: {
+              type: 'string',
+              description: 'Detailed menu description.',
+              example: 'Chocolate ice cream with brownie bites and whipped cream.',
             },
             stock: {
               type: 'integer',
@@ -414,6 +444,7 @@ const updateMenuRouteDocs = describeRoute({
             value: {
               name: 'Omurice (Cheese)',
               stock: 8,
+              description: 'Fluffy omelette with cheddar cheese and demi-glace sauce.',
             },
           },
         },
@@ -433,6 +464,11 @@ const updateMenuRouteDocs = describeRoute({
               description: 'Updated stock quantity.',
               example: 12,
             },
+            description: {
+              type: 'string',
+              description: 'Updated menu description. Empty string clears the value.',
+              example: 'Limited-time omurice with cheese sauce.',
+            },
             image: {
               type: 'string',
               format: 'binary',
@@ -447,6 +483,7 @@ const updateMenuRouteDocs = describeRoute({
             value: {
               name: 'Seasonal Omurice',
               stock: 12,
+              description: 'Seasonal omurice served with basil sauce.',
               image: 'menu-seasonal.jpg',
             },
           },
@@ -480,6 +517,7 @@ const updateMenuRouteDocs = describeRoute({
                 data: {
                   id: 1,
                   name: 'Omurice (Cheese)',
+                  description: 'Fluffy omelette with cheddar cheese and demi-glace sauce.',
                   stock: 8,
                   image_url: 'https://example.com/menus/1.jpg',
                   created_at: '2025-01-15T12:30:00.000Z',
@@ -574,6 +612,13 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
       return c.json(createErrorResponse('Image file is required.'), 400)
     }
 
+    const rawDescription = formData['description']
+    let description: string | null | undefined
+    if (typeof rawDescription === 'string') {
+      const trimmed = rawDescription.trim()
+      description = trimmed.length > 0 ? trimmed : null
+    }
+
     const db = getDb(c.env)
     let insertedMenu: MenuRow | undefined
     try {
@@ -582,6 +627,7 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
         .values({
           name,
           stock: parsedStock,
+          description: description ?? null,
         })
         .returning()
 
@@ -706,6 +752,8 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
     let name: string | undefined
     let stock: number | undefined
     let imageFile: File | undefined
+    let description: string | null | undefined
+    let descriptionProvided = false
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await c.req.parseBody()
@@ -727,12 +775,19 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
         stock = parsedStock
       }
 
+      const maybeDescription = formData['description']
+      if (typeof maybeDescription === 'string') {
+        descriptionProvided = true
+        const trimmedDescription = maybeDescription.trim()
+        description = trimmedDescription.length > 0 ? trimmedDescription : null
+      }
+
       const maybeImage = formData['image']
       if (maybeImage instanceof File && maybeImage.size > 0) {
         imageFile = maybeImage
       }
 
-      if (!name && stock === undefined && !imageFile) {
+      if (!name && stock === undefined && !imageFile && !descriptionProvided) {
         return c.json(createErrorResponse('No updatable fields provided.'), 400)
       }
     } else {
@@ -750,6 +805,11 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
 
       name = parsed.data.name?.trim()
       stock = parsed.data.stock
+      if (parsed.data.description !== undefined) {
+        descriptionProvided = true
+        const trimmedDescription = parsed.data.description.trim()
+        description = trimmedDescription.length > 0 ? trimmedDescription : null
+      }
     }
 
     const db = getDb(c.env)
@@ -771,6 +831,11 @@ export const registerMenuRoutes = (app: Hono<AppEnv>) => {
     if (typeof stock === 'number') {
       updateValues.stock = stock
       existing.stock = stock
+    }
+
+    if (descriptionProvided) {
+      updateValues.description = description ?? null
+      existing.description = description ?? null
     }
 
     if (imageFile) {

@@ -54,6 +54,7 @@ export const menus = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
+    description: text("description"),
     imageUrl: text("image_url"),
     stock: integer("stock").notNull().default(0),
     createdAt: text("created_at")

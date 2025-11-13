@@ -15,6 +15,13 @@
       "when": 1762880524419,
       "tag": "0001_cold_thanos",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1762999066520,
+      "tag": "0002_closed_pride",
+      "breakpoints": true
     }
   ]
 }
