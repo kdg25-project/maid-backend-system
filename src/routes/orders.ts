@@ -127,7 +127,19 @@ const mapOrder = (order: OrderRow) => ({
 const listOrdersRouteDocs = describeRoute({
   tags: ['Orders'],
   summary: 'List orders',
-  description: 'Retrieve every order currently recorded.',
+  description: 'Retrieve every order currently recorded. Optionally filter by state.',
+  parameters: [
+    {
+      in: 'query',
+      name: 'state',
+      required: false,
+      description: 'Only return orders matching the specified state.',
+      schema: {
+        type: 'string',
+        enum: ['pending', 'preparing', 'served'],
+      },
+    },
+  ],
   responses: {
     200: {
       description: 'Orders retrieved successfully.',
@@ -298,9 +310,24 @@ const updateOrderRouteDocs = describeRoute({
 
 export const registerOrderRoutes = (app: Hono<AppEnv>) => {
   app.get('/api/orders', listOrdersRouteDocs, async (c) => {
+    const rawState = c.req.query('state')
+    let stateFilter: z.infer<typeof orderStateSchema> | undefined
+
+    if (typeof rawState === 'string') {
+      const normalizedState = rawState.toLowerCase()
+      const parsedState = orderStateSchema.safeParse(normalizedState)
+      if (!parsedState.success) {
+        return c.json(createErrorResponse('Invalid state parameter.'), 400)
+      }
+      stateFilter = parsedState.data
+    }
+
     const db = getDb(c.env)
 
     const orderList = await db.query.orders.findMany({
+      where: stateFilter
+        ? (fields, { eq: equals }) => equals(fields.state, stateFilter)
+        : undefined,
       orderBy: (fields, { desc }) => desc(fields.createdAt),
     })
 
