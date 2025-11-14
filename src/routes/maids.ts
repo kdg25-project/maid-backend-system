@@ -769,7 +769,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     }
 
     const assignedUsers = await db.query.users.findMany({
-      where: (fields, { eq, and }) => and(eq(fields.maidId, maidId), eq(fields.isValid, true)),
+      where: (fields, { eq }) => eq(fields.maidId, maidId),
       orderBy: (fields, { desc }) => desc(fields.updatedAt),
     })
 
@@ -779,6 +779,7 @@ export const registerMaidRoutes = (app: Hono<AppEnv>) => {
     const usersByFilter = assignedUsers
       .map((user) => mapMaidAssignedUser(user, latestInstaxMap[user.id] ?? null))
       .filter((user) => statusFilter === 'both' || user.engagement_state === statusFilter)
+      .filter((user) => user.engagement_state === 'leaving' || user.is_valid)
 
     return c.json(
       createSuccessResponse({
